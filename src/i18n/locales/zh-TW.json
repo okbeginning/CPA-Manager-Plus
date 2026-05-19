@@ -1563,7 +1563,9 @@
     "pagination_next": "下一頁",
     "pagination_info": "第 {{current}} / {{total}} 頁 · 顯示 {{start}}-{{end}} / {{count}}",
     "page_size_label": "每頁",
-    "page_size_option": "{{count}} 行/頁"
+    "page_size_option": "{{count}} 行/頁",
+    "load_more_events": "載入更多事件",
+    "no_more_events": "沒有更多事件"
   },
   "logs": {
     "title": "記錄檢視",

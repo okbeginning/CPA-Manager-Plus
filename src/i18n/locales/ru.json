@@ -1534,7 +1534,9 @@
     "pagination_next": "Вперёд",
     "pagination_info": "Страница {{current}} / {{total}} · Показано {{start}}-{{end}} / {{count}}",
     "page_size_label": "На странице",
-    "page_size_option": "{{count}} / стр."
+    "page_size_option": "{{count}} / стр.",
+    "load_more_events": "Загрузить ещё события",
+    "no_more_events": "Больше событий нет"
   },
   "logs": {
     "title": "Просмотр журналов",

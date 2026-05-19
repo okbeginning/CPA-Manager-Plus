@@ -2048,8 +2048,11 @@ export function MonitoringCenterPage() {
     authFiles,
     summary: monitoringSummary,
     filteredRows,
+    eventsHasMore,
+    eventsLoadingMore,
     lastRefreshedAt: monitoringLastRefreshedAt,
     refreshMeta,
+    loadMoreEvents,
   } = useMonitoringData({
     config,
     modelPrices,
@@ -3817,6 +3820,22 @@ export function MonitoringCenterPage() {
           onPageSizeChange={handleRealtimePageSizeChange}
           t={t}
         />
+        {realtimeLogRows.length > 0 ? (
+          <div className={styles.loadMoreEventsBar}>
+            {eventsHasMore ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={loadMoreEvents}
+                disabled={eventsLoadingMore || overallLoading}
+              >
+                {eventsLoadingMore ? t('common.loading') : t('monitoring.load_more_events')}
+              </Button>
+            ) : (
+              <span>{t('monitoring.no_more_events')}</span>
+            )}
+          </div>
+        ) : null}
       </MonitoringPanel>
 
       <Modal

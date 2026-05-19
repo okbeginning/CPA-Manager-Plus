@@ -38,6 +38,7 @@ const isRecord = (value: unknown): value is RecordLike =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const padNumber = (value: number) => String(value).padStart(2, '0');
+const MONITORING_EVENTS_PAGE_LIMIT = 500;
 
 const buildLocalDayKey = (timestampMs: number) => {
   const date = new Date(timestampMs);
@@ -564,8 +565,11 @@ export interface UseMonitoringDataReturn {
   taskBuckets: MonitoringTaskBucketRow[];
   recentFailures: MonitoringFailureRow[];
   filteredRows: MonitoringEventRow[];
+  eventsHasMore: boolean;
+  eventsLoadingMore: boolean;
   lastRefreshedAt: Date | null;
   refreshMeta: (showLoading?: boolean) => Promise<void>;
+  loadMoreEvents: () => void;
 }
 
 type MonitoringMetaPayload = {
@@ -1928,6 +1932,33 @@ const buildFailureRowsFromAnalytics = (
     };
   });
 
+const buildAnalyticsEventKey = (item: MonitoringAnalyticsEventRow) =>
+  item.event_hash ||
+  [
+    item.timestamp_ms,
+    item.model,
+    item.source_hash,
+    item.api_key_hash,
+    item.auth_index,
+    item.endpoint,
+  ].join(':');
+
+const mergeAnalyticsEventItems = (
+  previous: MonitoringAnalyticsEventRow[],
+  next: MonitoringAnalyticsEventRow[]
+) => {
+  if (previous.length === 0) return next;
+  const seen = new Set(previous.map(buildAnalyticsEventKey));
+  const merged = previous.slice();
+  next.forEach((item) => {
+    const key = buildAnalyticsEventKey(item);
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  });
+  return merged;
+};
+
 const buildUsageDetailsFromAnalyticsEvents = (
   items: MonitoringAnalyticsEventRow[] = []
 ): UsageDetailWithEndpoint[] =>
@@ -2150,6 +2181,10 @@ export function useMonitoringData({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [analyticsNowMs, setAnalyticsNowMs] = useState(() => Date.now());
+  const [eventsBeforeMs, setEventsBeforeMs] = useState<number | null>(null);
+  const [eventItems, setEventItems] = useState<MonitoringAnalyticsEventRow[]>([]);
+  const [eventsHasMore, setEventsHasMore] = useState(false);
+  const [eventsLoadingMore, setEventsLoadingMore] = useState(false);
 
   const analyticsBounds = useMemo(() => {
     const bounds = getRangeBounds(timeRange, analyticsNowMs, customTimeRange);
@@ -2257,6 +2292,25 @@ export function useMonitoringData({
     [customTimeRange, timeRange]
   );
 
+  const analyticsScopeKey = useMemo(
+    () =>
+      JSON.stringify({
+        bounds: analyticsBounds,
+        searchQuery,
+        searchApiKeyHash,
+        filters: analyticsFilters,
+        granularity: analyticsGranularity,
+      }),
+    [analyticsBounds, analyticsFilters, analyticsGranularity, searchApiKeyHash, searchQuery]
+  );
+
+  useEffect(() => {
+    setEventsBeforeMs(null);
+    setEventItems([]);
+    setEventsHasMore(false);
+    setEventsLoadingMore(false);
+  }, [analyticsScopeKey]);
+
   const analytics = useMonitoringAnalytics({
     fromMs: analyticsBounds?.startMs,
     toMs: analyticsBounds?.endMs,
@@ -2274,15 +2328,39 @@ export function useMonitoringData({
       failure_sources: true,
       task_buckets: true,
       recent_failures: 8,
-      events_page: { limit: 50000 },
+      events_page: { limit: MONITORING_EVENTS_PAGE_LIMIT, before_ms: eventsBeforeMs },
       granularity: analyticsGranularity,
     },
     throttleMs: 1_000,
   });
 
+  useEffect(() => {
+    const page = analytics.data?.events;
+    if (!page) return;
+    setEventItems((previous) =>
+      eventsBeforeMs ? mergeAnalyticsEventItems(previous, page.items) : page.items
+    );
+    setEventsHasMore(page.has_more);
+    setEventsLoadingMore(false);
+  }, [analytics.data?.events, eventsBeforeMs]);
+
+  useEffect(() => {
+    if (analytics.error) {
+      setEventsLoadingMore(false);
+    }
+  }, [analytics.error]);
+
+  const loadMoreEvents = useCallback(() => {
+    if (analytics.loading || eventsLoadingMore || !eventsHasMore) return;
+    const nextBeforeMs = analytics.data?.events?.next_before_ms;
+    if (!nextBeforeMs) return;
+    setEventsLoadingMore(true);
+    setEventsBeforeMs(nextBeforeMs);
+  }, [analytics.data?.events?.next_before_ms, analytics.loading, eventsHasMore, eventsLoadingMore]);
+
   const allRows = useMemo(() => {
     const details = analytics.data
-      ? buildUsageDetailsFromAnalyticsEvents(analytics.data.events?.items ?? [])
+      ? buildUsageDetailsFromAnalyticsEvents(eventItems)
       : collectUsageDetailsWithEndpoint(usage);
     return buildEventRows(
       details,
@@ -2299,6 +2377,7 @@ export function useMonitoringData({
     authMetaMap,
     channelByAuthIndex,
     analytics.data,
+    eventItems,
     modelPrices,
     sourceInfoMap,
     usage,
@@ -2443,7 +2522,10 @@ export function useMonitoringData({
     taskBuckets,
     recentFailures,
     filteredRows,
+    eventsHasMore,
+    eventsLoadingMore,
     lastRefreshedAt: analytics.lastRefreshedAt,
     refreshMeta,
+    loadMoreEvents,
   };
 }

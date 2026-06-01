@@ -93,6 +93,19 @@ export function CodexSection({
     });
     return Array.from(modelSet).sort();
   }, [configs]);
+
+  useEffect(() => {
+    // Prune model filter state after config edits/reloads so stale hidden models cannot keep the list empty.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedModels((prev) => {
+      if (prev.size === 0) return prev;
+
+      const availableModels = new Set(allModelNames);
+      const next = new Set(Array.from(prev).filter((name) => availableModels.has(name)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [allModelNames]);
+
   const selectedModelNames = useMemo(() => Array.from(selectedModels).sort(), [selectedModels]);
   const modelFilterActive = selectedModelNames.length > 0;
   const modelFilterLabel = modelFilterActive
@@ -269,7 +282,7 @@ export function CodexSection({
         onChange={(value) => handleSortOptionChange(value as CodexProviderSortOption)}
         className={styles.sortSelect}
         disabled={actionsDisabled}
-        ariaLabel={t('ai_providers.sort_by_priority')}
+        ariaLabel={t('ai_providers.sort_by')}
         fullWidth={false}
       />
       <Button

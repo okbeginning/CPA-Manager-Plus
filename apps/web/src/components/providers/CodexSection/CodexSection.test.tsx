@@ -168,6 +168,7 @@ describe('CodexSection', () => {
       'name',
       'recent-success',
     ]);
+    expect(sortSelect.props.ariaLabel).toBe('ai_providers.sort_by');
 
     const modelFilterButton = renderer.root
       .findAllByType('button')
@@ -192,5 +193,87 @@ describe('CodexSection', () => {
 
     expect(onEdit).toHaveBeenLastCalledWith(2);
     expect(onToggle).toHaveBeenLastCalledWith(2, false);
+  });
+
+  it('clears stale model filters when configs no longer expose the selected model', () => {
+    const initialConfigs: ProviderKeyConfig[] = [
+      {
+        apiKey: 'alpha-key',
+        baseUrl: 'https://alpha.example.com/v1',
+        priority: 1,
+        models: [{ name: 'alpha-model' }],
+      },
+      {
+        apiKey: 'beta-key',
+        baseUrl: 'https://beta.example.com/v1',
+        priority: 2,
+        models: [{ name: 'beta-model' }],
+      },
+    ];
+    const updatedConfigs: ProviderKeyConfig[] = [
+      {
+        apiKey: 'alpha-key',
+        baseUrl: 'https://alpha.example.com/v1',
+        priority: 1,
+        models: [{ name: 'alpha-model' }],
+      },
+    ];
+    let renderer!: ReactTestRenderer;
+
+    act(() => {
+      renderer = create(
+        <CodexSection
+          configs={initialConfigs}
+          usageByProvider={new Map()}
+          loading={false}
+          disableControls={false}
+          isSwitching={false}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onToggle={() => {}}
+        />
+      );
+    });
+
+    const modelFilterButton = renderer.root
+      .findAllByType('button')
+      .find((button) => button.props['aria-label'] === 'ai_providers.model_search_placeholder');
+    if (!modelFilterButton) throw new Error('Model filter button not found');
+    clickButton(modelFilterButton);
+
+    const betaCheckbox = renderer.root
+      .findAllByType(SelectionCheckbox)
+      .find((checkbox) => getText(checkbox).includes('beta-model'));
+    if (!betaCheckbox) throw new Error('Beta model checkbox not found');
+    selectCheckbox(betaCheckbox);
+
+    expect(getRows(renderer)).toHaveLength(1);
+    expect(getText(getRows(renderer)[0])).toContain('https://beta.example.com/v1');
+
+    act(() => {
+      renderer.update(
+        <CodexSection
+          configs={updatedConfigs}
+          usageByProvider={new Map()}
+          loading={false}
+          disableControls={false}
+          isSwitching={false}
+          onAdd={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+          onToggle={() => {}}
+        />
+      );
+    });
+
+    const rows = getRows(renderer);
+    expect(rows).toHaveLength(1);
+    expect(getText(rows[0])).toContain('https://alpha.example.com/v1');
+    expect(
+      renderer.root
+        .findAllByType('button')
+        .some((button) => button.props['aria-label'] === 'ai_providers.model_search_placeholder')
+    ).toBe(true);
   });
 });

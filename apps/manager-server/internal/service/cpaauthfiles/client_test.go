@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -30,8 +31,17 @@ func TestParseAndVerifyIdentity(t *testing.T) {
 	if !file.Disabled || file.AuthIndex != "7" || file.Provider != "codex" {
 		t.Fatalf("file = %#v", file)
 	}
-	if _, err := VerifyIdentity(files, Identity{AuthFileName: "codex-auth.json", AuthIndex: "7", AccountIDSnapshot: "acct-456"}); !errors.Is(err, ErrIdentityMismatch) {
-		t.Fatalf("mismatch err = %v", err)
+	if _, err := VerifyIdentity(files, Identity{AuthFileName: "missing.json", AuthIndex: "7"}); !errors.Is(err, ErrAuthFileNotFound) {
+		t.Fatalf("not found err = %v", err)
+	}
+	if _, err := VerifyIdentity(files, Identity{AuthFileName: "codex-auth.json", AuthIndex: "7", AccountIDSnapshot: "acct-456"}); !errors.Is(err, ErrIdentityMismatch) || !strings.Contains(err.Error(), "account_id mismatch") {
+		t.Fatalf("account id mismatch err = %v", err)
+	}
+	if _, err := VerifyIdentity(files, Identity{AuthFileName: "codex-auth.json", AuthIndex: "7", Provider: "gemini"}); !errors.Is(err, ErrIdentityMismatch) || !strings.Contains(err.Error(), "provider mismatch") {
+		t.Fatalf("provider mismatch err = %v", err)
+	}
+	if _, err := VerifyIdentity(files, Identity{AuthFileName: "codex-auth.json", AuthIndex: "7", AccountSnapshot: "other@example.com"}); !errors.Is(err, ErrIdentityMismatch) || !strings.Contains(err.Error(), "account_snapshot mismatch") {
+		t.Fatalf("account snapshot mismatch err = %v", err)
 	}
 }
 

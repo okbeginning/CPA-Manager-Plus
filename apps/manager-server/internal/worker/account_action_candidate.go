@@ -149,8 +149,9 @@ func (w *AccountActionCandidateWorker) maybeAutoDisable(ctx context.Context, ite
 		AccountIDSnapshot: item.AccountIDSnapshot,
 	})
 	if err != nil {
-		_ = w.store.RecordAccountActionCandidateFailure(ctx, item.ID, "current CPA auth file identity mismatch; skipped auto-disable")
-		log.Printf("[account-action] pending candidate %d saved, but auth file identity mismatch for %q; skip auto-disable", item.ID, item.AuthFileName)
+		reason := "current CPA auth file identity verification failed: " + err.Error()
+		_ = w.store.RecordAccountActionCandidateFailure(ctx, item.ID, reason)
+		log.Printf("[account-action] pending candidate %d saved, but auth file identity verification failed for %q: %v; skip auto-disable", item.ID, item.AuthFileName, err)
 		return
 	}
 	if current.Disabled {

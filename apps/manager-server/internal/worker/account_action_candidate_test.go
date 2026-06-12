@@ -208,6 +208,139 @@ func TestAccountActionCandidateWorkerAutoDisableRejectsIdentityMismatch(t *testi
 	}
 }
 
+func TestAccountActionCandidateWorkerAutoDisablesReauth(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/usage.sqlite")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	var patched bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /auth-files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name":       "codex-auth.json",
+				"auth_index": "7",
+				"provider":   "codex",
+				"account":    "user@example.com",
+				"account_id": "acct-123",
+				"disabled":   false,
+			}})
+		case "PATCH /auth-files":
+			patched = true
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAccountActionCandidateWorker(st, true)
+	worker.handleCandidate(context.Background(), accountActionCandidate{
+		BaseURL:        server.URL,
+		ManagementKey:  "mgmt",
+		FileName:       "codex-auth.json",
+		AuthIndex:      "7",
+		DisplayAccount: "user@example.com",
+		AccountID:      "acct-123",
+		Provider:       "codex",
+		ActionType:     model.AccountActionTypeReauth,
+		Reason:         "reauth required",
+	})
+
+	if !patched {
+		t.Fatal("expected reauth candidate to auto-disable")
+	}
+	items, err := st.ListAccountActionCandidates(context.Background(), model.AccountActionStatusPending, 10)
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	if len(items) != 1 || items[0].ActionType != model.AccountActionTypeReauth || items[0].LastError != "" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestAccountActionCandidateWorkerAutoDisableSkipsAlreadyDisabled(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/usage.sqlite")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	var patched bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /auth-files":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"name":       "codex-auth.json",
+				"auth_index": "7",
+				"provider":   "codex",
+				"account":    "user@example.com",
+				"account_id": "acct-123",
+				"disabled":   true,
+			}})
+		case "PATCH /auth-files":
+			patched = true
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	worker := NewAccountActionCandidateWorker(st, true)
+	worker.handleCandidate(context.Background(), accountActionCandidate{
+		BaseURL:        server.URL,
+		ManagementKey:  "mgmt",
+		FileName:       "codex-auth.json",
+		AuthIndex:      "7",
+		DisplayAccount: "user@example.com",
+		AccountID:      "acct-123",
+		Provider:       "codex",
+		ActionType:     model.AccountActionTypeDelete,
+		Reason:         "token revoked",
+	})
+
+	if patched {
+		t.Fatal("PATCH should not be called when auth file is already disabled")
+	}
+	items, err := st.ListAccountActionCandidates(context.Background(), model.AccountActionStatusPending, 10)
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	if len(items) != 1 || items[0].LastError != "" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
+func TestAccountActionCandidateWorkerAutoDisableRecordsMissingRuntimeConfig(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/usage.sqlite")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	worker := NewAccountActionCandidateWorker(st, true)
+	worker.handleCandidate(context.Background(), accountActionCandidate{
+		FileName:       "codex-auth.json",
+		AuthIndex:      "7",
+		DisplayAccount: "user@example.com",
+		AccountID:      "acct-123",
+		Provider:       "codex",
+		ActionType:     model.AccountActionTypeDelete,
+		Reason:         "token revoked",
+	})
+
+	items, err := st.ListAccountActionCandidates(context.Background(), model.AccountActionStatusPending, 10)
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	if len(items) != 1 || !strings.Contains(items[0].LastError, "runtime config") {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
 func TestAccountActionCandidateWorkerAutoDisableSkipsReview(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/usage.sqlite")
 	if err != nil {

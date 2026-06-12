@@ -18,6 +18,8 @@ import (
 
 const DefaultTimeout = 15 * time.Second
 
+var ErrAuthFileNotFound = errors.New("CPA auth file not found")
+
 var ErrIdentityMismatch = errors.New("CPA auth file identity mismatch")
 
 type Client struct {
@@ -120,25 +122,20 @@ func Find(files []File, fileName string, authIndex string) (File, bool) {
 }
 
 func VerifyIdentity(files []File, identity Identity) (File, error) {
-	for _, file := range files {
-		if file.Name != strings.TrimSpace(identity.AuthFileName) {
-			continue
-		}
-		if identity.AuthIndex != "" && file.AuthIndex != strings.TrimSpace(identity.AuthIndex) {
-			continue
-		}
-		if identity.AccountIDSnapshot != "" && file.AccountID != strings.TrimSpace(identity.AccountIDSnapshot) {
-			return File{}, ErrIdentityMismatch
-		}
-		if identity.Provider != "" && !strings.EqualFold(file.Provider, strings.TrimSpace(identity.Provider)) {
-			return File{}, ErrIdentityMismatch
-		}
-		if identity.AccountSnapshot != "" && file.AccountSnapshot != strings.TrimSpace(identity.AccountSnapshot) {
-			return File{}, ErrIdentityMismatch
-		}
-		return file, nil
+	file, ok := Find(files, identity.AuthFileName, identity.AuthIndex)
+	if !ok {
+		return File{}, ErrAuthFileNotFound
 	}
-	return File{}, ErrIdentityMismatch
+	if identity.AccountIDSnapshot != "" && file.AccountID != strings.TrimSpace(identity.AccountIDSnapshot) {
+		return File{}, fmt.Errorf("%w: account_id mismatch (expected %q, got %q)", ErrIdentityMismatch, strings.TrimSpace(identity.AccountIDSnapshot), file.AccountID)
+	}
+	if identity.Provider != "" && !strings.EqualFold(file.Provider, strings.TrimSpace(identity.Provider)) {
+		return File{}, fmt.Errorf("%w: provider mismatch (expected %q, got %q)", ErrIdentityMismatch, strings.TrimSpace(identity.Provider), file.Provider)
+	}
+	if identity.AccountSnapshot != "" && file.AccountSnapshot != strings.TrimSpace(identity.AccountSnapshot) {
+		return File{}, fmt.Errorf("%w: account_snapshot mismatch (expected %q, got %q)", ErrIdentityMismatch, strings.TrimSpace(identity.AccountSnapshot), file.AccountSnapshot)
+	}
+	return file, nil
 }
 
 func (c *Client) PatchDisabled(ctx context.Context, baseURL string, managementKey string, fileName string, disabled bool) error {

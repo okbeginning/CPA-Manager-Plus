@@ -84,6 +84,8 @@ export type VisualConfigValues = {
   authDir: string;
   apiKeysText: string;
   pluginsEnabled: boolean;
+  pluginsDir: string;
+  pluginStoreSourcesText: string;
   debug: boolean;
   commercialMode: boolean;
   usageStatisticsEnabled: boolean;
@@ -147,6 +149,8 @@ export const DEFAULT_VISUAL_VALUES: VisualConfigValues = {
   authDir: '',
   apiKeysText: '',
   pluginsEnabled: false,
+  pluginsDir: '',
+  pluginStoreSourcesText: '',
   debug: false,
   commercialMode: false,
   usageStatisticsEnabled: false,

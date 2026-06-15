@@ -155,6 +155,19 @@ export function IconInfo({ size = 20, ...props }: IconProps) {
   );
 }
 
+export function IconPlugin({ size = 20, ...props }: IconProps) {
+  return (
+    <svg {...baseSvgProps} width={size} height={size} {...props}>
+      <path d="M6 7h12v4a6 6 0 0 1-12 0Z" fill="currentColor" fillOpacity="0.1" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
+      <path d="M6 7h12v4a6 6 0 0 1-12 0Z" />
+      <path d="M12 17v4" />
+      <path d="M9 21h6" />
+    </svg>
+  );
+}
+
 export function IconRefreshCw({ size = 20, ...props }: IconProps) {
   return (
     <svg {...baseSvgProps} width={size} height={size} {...props}>
@@ -602,11 +615,12 @@ export function IconSidebarQuota({ size = 20, ...props }: IconProps) {
 export function IconSidebarPlugins({ size = 20, ...props }: IconProps) {
   return (
     <svg {...sidebarSvgProps} width={size} height={size} {...props}>
-      <path d="M9 3h6v4h4v6h-4v8H9v-8H5V7h4Z" fill="currentColor" fillOpacity="0.12" />
-      <path d="M9 3h6v4h4v6h-4v8H9v-8H5V7h4Z" />
-      <path d="M10 10h4" />
-      <path d="M10 14h4" />
-      <circle cx="12" cy="17.5" r="0.45" fill="currentColor" stroke="none" />
+      <path d="M6 7h12v4a6 6 0 0 1-12 0Z" fill="currentColor" fillOpacity="0.12" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
+      <path d="M6 7h12v4a6 6 0 0 1-12 0Z" />
+      <path d="M12 17v4" />
+      <path d="M9 21h6" />
     </svg>
   );
 }

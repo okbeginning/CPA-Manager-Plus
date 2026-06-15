@@ -1,10 +1,40 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mocks } = vi.hoisted(() => ({
+  mocks: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    patch: vi.fn(),
+    delete: vi.fn(),
+  },
+}));
+
+vi.mock('./client', () => ({
+  apiClient: {
+    get: mocks.get,
+    post: mocks.post,
+    put: mocks.put,
+    patch: mocks.patch,
+    delete: mocks.delete,
+  },
+}));
+
 import {
   normalizePluginDeleteResult,
   normalizePluginList,
   normalizePluginStoreList,
   normalizePluginStoreInstallResult,
+  pluginStoreApi,
 } from './plugins';
+
+beforeEach(() => {
+  mocks.get.mockReset();
+  mocks.post.mockReset();
+  mocks.put.mockReset();
+  mocks.patch.mockReset();
+  mocks.delete.mockReset();
+});
 
 describe('plugin API normalizers', () => {
   it('normalizes plugin list responses and filters invalid entries', () => {
@@ -94,8 +124,24 @@ describe('plugin API normalizers', () => {
     const store = normalizePluginStoreList({
       pluginsEnabled: true,
       pluginsDir: 'plugins',
+      sources: [
+        { id: 'official', name: 'Official', url: 'https://example.test/registry.json' },
+        { name: '', url: '' },
+      ],
+      source_errors: [
+        {
+          source_id: 'community',
+          source_name: 'Community',
+          source_url: 'https://community.test/registry.json',
+          message: 'timeout',
+        },
+      ],
       plugins: [
         {
+          store_id: 'official/demo',
+          source_id: 'official',
+          source_name: 'Official',
+          source_url: 'https://example.test/registry.json',
           id: 'demo',
           name: 'Demo',
           installed: true,
@@ -108,7 +154,22 @@ describe('plugin API normalizers', () => {
     });
 
     expect(store.pluginsEnabled).toBe(true);
+    expect(store.sources).toEqual([
+      { id: 'official', name: 'Official', url: 'https://example.test/registry.json' },
+    ]);
+    expect(store.sourceErrors).toEqual([
+      {
+        sourceId: 'community',
+        sourceName: 'Community',
+        sourceUrl: 'https://community.test/registry.json',
+        message: 'timeout',
+      },
+    ]);
     expect(store.plugins[0]).toMatchObject({
+      storeId: 'official/demo',
+      sourceId: 'official',
+      sourceName: 'Official',
+      sourceUrl: 'https://example.test/registry.json',
       id: 'demo',
       installed: true,
       installedVersion: '1.0.0',
@@ -120,6 +181,9 @@ describe('plugin API normalizers', () => {
     expect(
       normalizePluginStoreInstallResult({
         status: 'installed',
+        source_id: 'official',
+        source_name: 'Official',
+        source_url: 'https://example.test/registry.json',
         id: 'demo',
         version: '1.1.0',
         path: '/plugins/demo',
@@ -128,11 +192,33 @@ describe('plugin API normalizers', () => {
       })
     ).toEqual({
       status: 'installed',
+      sourceId: 'official',
+      sourceName: 'Official',
+      sourceUrl: 'https://example.test/registry.json',
       id: 'demo',
       version: '1.1.0',
       path: '/plugins/demo',
       pluginsEnabled: true,
       restartRequired: true,
+    });
+  });
+
+  it('passes the selected source when installing from the plugin store', async () => {
+    mocks.post.mockResolvedValue({
+      status: 'installed',
+      source_id: 'official',
+      id: 'demo/plugin',
+    });
+
+    const result = await pluginStoreApi.install('demo/plugin', { sourceId: ' official ' });
+
+    expect(mocks.post).toHaveBeenCalledWith('/plugin-store/demo%2Fplugin/install', undefined, {
+      params: { source: 'official' },
+    });
+    expect(result).toMatchObject({
+      status: 'installed',
+      sourceId: 'official',
+      id: 'demo/plugin',
     });
   });
 });

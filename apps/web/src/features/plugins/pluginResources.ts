@@ -2,10 +2,31 @@ import type { PluginListEntry, PluginMenu } from '@/types';
 import { normalizeApiBase } from '@/utils/connection';
 
 export const PLUGIN_RESOURCES_REFRESH_EVENT = 'plugin-resources-refresh';
+export const PLUGIN_RESOURCES_SETTLE_REFRESH_DELAY_MS = 1600;
 
-export const notifyPluginResourcesChanged = () => {
-  window.dispatchEvent(new Event(PLUGIN_RESOURCES_REFRESH_EVENT));
+export const notifyPluginResourcesChanged = (options?: { delayMs?: number }) => {
+  const dispatch = () => window.dispatchEvent(new Event(PLUGIN_RESOURCES_REFRESH_EVENT));
+  const delayMs = options?.delayMs ?? 0;
+  if (delayMs > 0) {
+    window.setTimeout(dispatch, delayMs);
+    return;
+  }
+  dispatch();
 };
+
+export const isPluginManagementNavVisible = ({
+  supportsPlugin,
+}: {
+  supportsPlugin: boolean;
+}) => supportsPlugin;
+
+export const isPluginResourceNavVisible = ({
+  supportsPlugin,
+  pluginsEnabled,
+}: {
+  supportsPlugin: boolean;
+  pluginsEnabled?: boolean | null;
+}) => supportsPlugin && pluginsEnabled === true;
 
 export interface PluginResourceEntry {
   pluginID: string;

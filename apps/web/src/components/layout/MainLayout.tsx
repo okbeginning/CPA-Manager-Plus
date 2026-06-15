@@ -36,6 +36,8 @@ import {
 import { pluginsApi } from '@/services/api';
 import {
   collectPluginResourceEntries,
+  isPluginManagementNavVisible,
+  isPluginResourceNavVisible,
   PLUGIN_RESOURCES_REFRESH_EVENT,
   resolvePluginAssetURL,
   type PluginResourceEntry,
@@ -226,7 +228,8 @@ export function MainLayout() {
   const isLogsPage = location.pathname.startsWith('/logs');
   const isPluginResourcePage = location.pathname.startsWith('/plugin-pages');
   const showSidebarLabels = !sidebarCollapsed || sidebarOpen;
-  const pluginMenuVisible = supportsPlugin && config?.pluginsEnabled === true;
+  const pluginControlMenuVisible = isPluginManagementNavVisible({ supportsPlugin });
+  const configPluginsEnabled = config?.pluginsEnabled;
 
   // 将顶部悬浮控制区高度写入 CSS 变量，供移动端粘性元素和浮层避让。
   useLayoutEffect(() => {
@@ -377,18 +380,25 @@ export function MainLayout() {
   }, [fetchConfig]);
 
   const loadPluginResources = useCallback(async () => {
-    if (connectionStatus !== 'connected' || !pluginMenuVisible) {
+    if (connectionStatus !== 'connected' || !supportsPlugin) {
       setPluginResources([]);
       return;
     }
 
     try {
       const plugins = await pluginsApi.list();
-      setPluginResources(collectPluginResourceEntries(plugins.plugins));
+      setPluginResources(
+        isPluginResourceNavVisible({
+          supportsPlugin,
+          pluginsEnabled: plugins.pluginsEnabled,
+        })
+          ? collectPluginResourceEntries(plugins.plugins)
+          : []
+      );
     } catch {
       setPluginResources([]);
     }
-  }, [connectionStatus, pluginMenuVisible]);
+  }, [connectionStatus, supportsPlugin]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -401,7 +411,7 @@ export function MainLayout() {
       window.clearTimeout(timer);
       window.removeEventListener(PLUGIN_RESOURCES_REFRESH_EVENT, loadPluginResources);
     };
-  }, [apiBase, loadPluginResources]);
+  }, [apiBase, configPluginsEnabled, loadPluginResources]);
 
   const fileLogsAvailable = isFileLogsAvailable(config);
   const navShortLabel = (key: string, fallback: string) => {
@@ -432,7 +442,7 @@ export function MainLayout() {
         ]
       : []),
   ];
-  const pluginControlNavItems: NavItem[] = pluginMenuVisible
+  const pluginControlNavItems: NavItem[] = pluginControlMenuVisible
     ? [
         {
           path: '/plugins',
@@ -442,7 +452,7 @@ export function MainLayout() {
         },
       ]
     : [];
-  const pluginResourceNavItems: NavItem[] = pluginMenuVisible
+  const pluginResourceNavItems: NavItem[] = pluginControlMenuVisible
     ? pluginResources.map((resource) => ({
         path: resource.route,
         label: resource.label,

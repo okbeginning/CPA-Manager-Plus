@@ -61,6 +61,10 @@ export interface PluginDeleteResult {
 }
 
 export interface PluginStoreEntry {
+  storeId: string;
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
   id: string;
   name: string;
   description: string;
@@ -81,14 +85,32 @@ export interface PluginStoreEntry {
   updateAvailable: boolean;
 }
 
+export interface PluginStoreSource {
+  id: string;
+  name: string;
+  url: string;
+}
+
+export interface PluginStoreSourceError {
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
+  message: string;
+}
+
 export interface PluginStoreResponse {
   pluginsEnabled: boolean;
   pluginsDir: string;
+  sources: PluginStoreSource[];
+  sourceErrors: PluginStoreSourceError[];
   plugins: PluginStoreEntry[];
 }
 
 export interface PluginStoreInstallResult {
   status: string;
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
   id: string;
   version: string;
   path: string;

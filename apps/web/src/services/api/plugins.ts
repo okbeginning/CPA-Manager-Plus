@@ -10,6 +10,8 @@ import type {
   PluginStoreEntry,
   PluginStoreInstallResult,
   PluginStoreResponse,
+  PluginStoreSource,
+  PluginStoreSourceError,
 } from '@/types';
 import { isRecord } from '@/utils/helpers';
 
@@ -102,7 +104,7 @@ const normalizePluginEntry = (value: unknown): PluginListEntry | null => {
     effectiveEnabled: asBoolean(value.effective_enabled ?? value.effectiveEnabled),
     supportsOAuth: asBoolean(value.supports_oauth ?? value.supportsOAuth),
     logo: asString(value.logo || metadata?.logo).trim(),
-    configFields: configFields.length > 0 ? configFields : metadata?.configFields ?? [],
+    configFields: configFields.length > 0 ? configFields : (metadata?.configFields ?? []),
     menus: normalizeMenus(value.menus),
     metadata,
   };
@@ -148,6 +150,10 @@ const normalizeStoreEntry = (value: unknown): PluginStoreEntry | null => {
     : [];
 
   return {
+    storeId: asString(value.store_id ?? value.storeId).trim(),
+    sourceId: asString(value.source_id ?? value.sourceId).trim(),
+    sourceName: asString(value.source_name ?? value.sourceName).trim(),
+    sourceUrl: asString(value.source_url ?? value.sourceUrl).trim(),
     id,
     name: asString(value.name).trim(),
     description: asString(value.description).trim(),
@@ -169,6 +175,46 @@ const normalizeStoreEntry = (value: unknown): PluginStoreEntry | null => {
   };
 };
 
+const normalizeStoreSource = (value: unknown): PluginStoreSource | null => {
+  if (!isRecord(value)) return null;
+  const id = asString(value.id).trim();
+  const url = asString(value.url).trim();
+  if (!id && !url) return null;
+  return {
+    id,
+    name: asString(value.name).trim(),
+    url,
+  };
+};
+
+const normalizeStoreSources = (value: unknown): PluginStoreSource[] =>
+  Array.isArray(value)
+    ? value
+        .map((item) => normalizeStoreSource(item))
+        .filter((source): source is PluginStoreSource => Boolean(source))
+    : [];
+
+const normalizeStoreSourceError = (value: unknown): PluginStoreSourceError | null => {
+  if (!isRecord(value)) return null;
+  const message = asString(value.message).trim();
+  const sourceId = asString(value.source_id ?? value.sourceId).trim();
+  const sourceUrl = asString(value.source_url ?? value.sourceUrl).trim();
+  if (!message && !sourceId && !sourceUrl) return null;
+  return {
+    sourceId,
+    sourceName: asString(value.source_name ?? value.sourceName).trim(),
+    sourceUrl,
+    message,
+  };
+};
+
+const normalizeStoreSourceErrors = (value: unknown): PluginStoreSourceError[] =>
+  Array.isArray(value)
+    ? value
+        .map((item) => normalizeStoreSourceError(item))
+        .filter((sourceError): sourceError is PluginStoreSourceError => Boolean(sourceError))
+    : [];
+
 export const normalizePluginStoreList = (value: unknown): PluginStoreResponse => {
   const source = isRecord(value) ? value : {};
   const plugins = Array.isArray(source.plugins)
@@ -180,6 +226,8 @@ export const normalizePluginStoreList = (value: unknown): PluginStoreResponse =>
   return {
     pluginsEnabled: asBoolean(source.plugins_enabled ?? source.pluginsEnabled),
     pluginsDir: asString(source.plugins_dir ?? source.pluginsDir).trim() || 'plugins',
+    sources: normalizeStoreSources(source.sources),
+    sourceErrors: normalizeStoreSourceErrors(source.source_errors ?? source.sourceErrors),
     plugins,
   };
 };
@@ -188,6 +236,9 @@ export const normalizePluginStoreInstallResult = (value: unknown): PluginStoreIn
   const source = isRecord(value) ? value : {};
   return {
     status: asString(source.status).trim(),
+    sourceId: asString(source.source_id ?? source.sourceId).trim(),
+    sourceName: asString(source.source_name ?? source.sourceName).trim(),
+    sourceUrl: asString(source.source_url ?? source.sourceUrl).trim(),
     id: asString(source.id).trim(),
     version: asString(source.version).trim(),
     path: asString(source.path).trim(),
@@ -228,8 +279,15 @@ export const pluginStoreApi = {
     return normalizePluginStoreList(data);
   },
 
-  async install(id: string): Promise<PluginStoreInstallResult> {
-    const data = await apiClient.post(`/plugin-store/${encodeURIComponent(id)}/install`);
+  async install(id: string, options?: { sourceId?: string }): Promise<PluginStoreInstallResult> {
+    const sourceId = options?.sourceId?.trim();
+    const data = await apiClient.post(
+      `/plugin-store/${encodeURIComponent(id)}/install`,
+      undefined,
+      {
+        params: sourceId ? { source: sourceId } : undefined,
+      }
+    );
     return normalizePluginStoreInstallResult(data);
   },
 };

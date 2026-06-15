@@ -26,7 +26,6 @@ import { ConfigPage } from '@/pages/ConfigPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { PluginResourcePage } from '@/pages/PluginResourcePage';
 import { PluginsPage } from '@/pages/PluginsPage';
-import { PluginStorePage } from '@/pages/PluginStorePage';
 import { SystemPage } from '@/pages/SystemPage';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { CodexInspectionModeTabs } from '@/features/monitoring/components/CodexInspectionModeTabs';
@@ -256,7 +255,7 @@ const mainRoutes = [
     path: '/plugin-store',
     element: (
       <PluginGate>
-        <PluginStorePage />
+        <Navigate to="/plugins?tab=store" replace />
       </PluginGate>
     ),
   },
@@ -269,7 +268,7 @@ const mainRoutes = [
     ),
   },
   { path: '/plugins/*', element: <Navigate to="/plugins" replace /> },
-  { path: '/plugin-store/*', element: <Navigate to="/plugin-store" replace /> },
+  { path: '/plugin-store/*', element: <Navigate to="/plugins?tab=store" replace /> },
   { path: '/plugin-pages/*', element: <Navigate to="/" replace /> },
   { path: '/config', element: <ConfigPage /> },
   {

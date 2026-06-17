@@ -19,7 +19,7 @@ const bootstrapStateKey = "bootstrap_state_v1"
 type Repository interface {
 	SaveManagerConfig(ctx context.Context, cfg model.ManagerConfig) error
 	LoadManagerConfig(ctx context.Context) (model.ManagerConfig, bool, error)
-	SaveAutomationSettings(ctx context.Context, settings model.AutomationSettings) error
+	SaveAutomationSettings(ctx context.Context, settings model.AutomationSettings) (model.AutomationSettings, error)
 	LoadAutomationSettings(ctx context.Context) (model.AutomationSettings, bool, error)
 	SaveSetup(ctx context.Context, setup model.Setup) error
 	LoadSetup(ctx context.Context) (model.Setup, bool, error)
@@ -128,11 +128,11 @@ func (r *repository) LoadManagerConfig(ctx context.Context) (model.ManagerConfig
 	return cfg, true, nil
 }
 
-func (r *repository) SaveAutomationSettings(ctx context.Context, settings model.AutomationSettings) error {
+func (r *repository) SaveAutomationSettings(ctx context.Context, settings model.AutomationSettings) (model.AutomationSettings, error) {
 	settings.UpdatedAtMS = time.Now().UnixMilli()
 	data, err := json.Marshal(settings)
 	if err != nil {
-		return err
+		return model.AutomationSettings{}, err
 	}
 	_, err = r.db.ExecContext(
 		ctx,
@@ -143,7 +143,10 @@ func (r *repository) SaveAutomationSettings(ctx context.Context, settings model.
 		string(data),
 		settings.UpdatedAtMS,
 	)
-	return err
+	if err != nil {
+		return model.AutomationSettings{}, err
+	}
+	return settings, nil
 }
 
 func (r *repository) LoadAutomationSettings(ctx context.Context) (model.AutomationSettings, bool, error) {

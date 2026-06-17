@@ -116,7 +116,7 @@ func (s *Store) LoadManagerConfig(ctx context.Context) (ManagerConfig, bool, err
 	return s.Settings.LoadManagerConfig(ctx)
 }
 
-func (s *Store) SaveAutomationSettings(ctx context.Context, settings AutomationSettings) error {
+func (s *Store) SaveAutomationSettings(ctx context.Context, settings AutomationSettings) (AutomationSettings, error) {
 	return s.Settings.SaveAutomationSettings(ctx, settings)
 }
 

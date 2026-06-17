@@ -36,18 +36,20 @@ export function AccountProcessingPolicySection() {
   const [status, setStatus] = useState<AccountProcessingPolicy | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<CapabilityKey | null>(null);
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [saveError, setSaveError] = useState<{ key: CapabilityKey; message: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!managerServiceBase || !managementKey) return;
     setLoading(true);
-    setError('');
+    setLoadError('');
+    setSaveError(null);
     try {
       const data = await usageServiceApi.getAccountProcessingPolicy(managerServiceBase, managementKey);
       setStatus(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err || 'request failed');
-      setError(message);
+      setLoadError(message);
       showNotification(
         t('accountPolicy.load_failed', { message, defaultValue: `Load failed: ${message}` }),
         'error'
@@ -74,7 +76,7 @@ export function AccountProcessingPolicySection() {
         if (!confirmed) return;
       }
       setSavingKey(key);
-      setError('');
+      setSaveError(null);
       try {
         const patch: AccountProcessingPolicyPatch = { [patchKeyByCapability[key]]: value };
         const data = await usageServiceApi.updateAccountProcessingPolicy(
@@ -98,7 +100,7 @@ export function AccountProcessingPolicySection() {
             : err instanceof Error
               ? err.message
               : String(err || 'request failed');
-        setError(message);
+        setSaveError({ key, message });
         showNotification(
           t('accountPolicy.save_failed', { message, defaultValue: `Save failed: ${message}` }),
           'error'
@@ -265,17 +267,38 @@ export function AccountProcessingPolicySection() {
         </span>
       </div>
 
-      {error ? (
+      <p className={styles.gatingNote}>
+        {t('accountPolicy.gating_note', {
+          defaultValue:
+            'Disabling a switch only stops new request-monitoring events from being processed. Tasks already queued or in progress will continue to finish.',
+        })}
+      </p>
+
+      {loadError && !status ? (
         <div className={styles.errorState}>
           <strong>{t('accountPolicy.load_failed_title', { defaultValue: 'Load failed' })}</strong>
-          <span>{error}</span>
+          <span>{loadError}</span>
         </div>
       ) : (
-        <div className={styles.cards}>
-          {(
-            ['codexQuotaCooldown', 'authIssueQueue', 'authIssueAutoDisable'] as CapabilityKey[]
-          ).map(renderCapabilityCard)}
-        </div>
+        <>
+          {saveError ? (
+            <div className={styles.saveErrorBanner} role="alert">
+              <strong>{t(`accountPolicy.${saveError.key}_title`)}</strong>
+              <span>{saveError.message}</span>
+            </div>
+          ) : null}
+          {loadError ? (
+            <div className={styles.saveErrorBanner} role="alert">
+              <strong>{t('accountPolicy.load_failed_title', { defaultValue: 'Load failed' })}</strong>
+              <span>{loadError}</span>
+            </div>
+          ) : null}
+          <div className={styles.cards}>
+            {(
+              ['codexQuotaCooldown', 'authIssueQueue', 'authIssueAutoDisable'] as CapabilityKey[]
+            ).map(renderCapabilityCard)}
+          </div>
+        </>
       )}
     </section>
   );

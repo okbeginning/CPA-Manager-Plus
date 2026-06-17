@@ -2864,6 +2864,7 @@
     "effective_label": "当前生效",
     "advanced_summary": "高级信息：配置字段 / 环境变量",
     "env_locked_hint": "该开关由环境变量锁定，请修改服务环境变量并重启。",
-    "env_locked_reason": "由环境变量 {{envKey}} 锁定。修改该变量并重启服务后才能更改此开关。"
+    "env_locked_reason": "由环境变量 {{envKey}} 锁定。修改该变量并重启服务后才能更改此开关。",
+    "gating_note": "关闭某项策略只会阻止后续请求监控事件进入处理流程；已经在队列中或正在执行的任务会继续完成。"
   }
 }

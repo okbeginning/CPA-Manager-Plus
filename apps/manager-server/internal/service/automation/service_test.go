@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/config"
@@ -21,11 +22,12 @@ func (s *stubSettingsStore) LoadAutomationSettings(ctx context.Context) (store.A
 	return s.settings, s.ok, s.err
 }
 
-func (s *stubSettingsStore) SaveAutomationSettings(ctx context.Context, settings store.AutomationSettings) error {
+func (s *stubSettingsStore) SaveAutomationSettings(ctx context.Context, settings store.AutomationSettings) (store.AutomationSettings, error) {
 	s.saves++
+	settings.UpdatedAtMS = 1
 	s.settings = settings
 	s.ok = true
-	return nil
+	return settings, nil
 }
 
 func mustStatus(t *testing.T, svc *Service, ctx context.Context) Status {
@@ -106,7 +108,7 @@ func TestStatusUsesDBSettingsUnlessEnvLocked(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 
-	if err := st.SaveAutomationSettings(ctx, store.AutomationSettings{
+	if _, err := st.SaveAutomationSettings(ctx, store.AutomationSettings{
 		QuotaCooldownEnabled:      boolPtr(true),
 		AccountActionsEnabled:     boolPtr(false),
 		AccountActionsAutoDisable: boolPtr(true),
@@ -187,5 +189,78 @@ func TestRuntimeSettingsKeepsLastKnownOnLoadError(t *testing.T) {
 	fallback := fresh.RuntimeSettings(ctx)
 	if fallback.QuotaCooldownEnabled {
 		t.Fatalf("runtime gating should fall back to startup default before first successful load, got %#v", fallback)
+	}
+}
+
+// TestUpdateSerializesConcurrentPatches is a regression guard for the
+// read-modify-write race: many concurrent PATCH requests targeting different
+// fields must all be persisted. Without the updateMu lock, later saves would
+// overwrite earlier ones based on a stale snapshot and drop fields.
+func TestUpdateSerializesConcurrentPatches(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/usage.sqlite")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	svc := New(config.Config{}, st)
+
+	patches := []UpdateRequest{
+		{QuotaCooldownEnabled: boolPtr(true)},
+		{AccountActionsEnabled: boolPtr(true)},
+		{AccountActionsAutoDisable: boolPtr(true)},
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		patch := patches[i%len(patches)]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := svc.Update(ctx, patch); err != nil {
+				t.Errorf("concurrent Update failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	status := mustStatus(t, svc, ctx)
+	if !status.QuotaCooldown.Enabled {
+		t.Fatalf("quotaCooldown field lost under concurrent updates: %#v", status)
+	}
+	if !status.AccountActions.Enabled {
+		t.Fatalf("accountActions field lost under concurrent updates: %#v", status)
+	}
+	if !status.AccountActionsAutoDisable.Configured {
+		t.Fatalf("accountActionsAutoDisable field lost under concurrent updates: %#v", status)
+	}
+	if status.AccountActionsAutoDisable.Enabled != (status.AccountActions.Enabled && status.AccountActionsAutoDisable.Configured) {
+		t.Fatalf("auto-disable effective value inconsistent: %#v", status)
+	}
+}
+
+// TestUpdateReturnsPersistedRecordWithoutRereading verifies that Update builds
+// its response from the record the repository just persisted (with an
+// UpdatedAtMS), not from a re-read. This guarantees the persisted state and the
+// returned runtime view cannot diverge when a transient read failure happens
+// right after a successful save.
+func TestUpdateReturnsPersistedRecordWithoutRereading(t *testing.T) {
+	loader := &stubSettingsStore{ok: false}
+	svc := &Service{cfg: config.Config{}, store: loader}
+
+	status, err := svc.Update(context.Background(), UpdateRequest{QuotaCooldownEnabled: boolPtr(true)})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if !status.QuotaCooldown.Enabled {
+		t.Fatalf("response should reflect persisted value, got %#v", status.QuotaCooldown)
+	}
+	if status.UpdatedAtMS == 0 {
+		t.Fatalf("response should carry the UpdatedAtMS assigned by the store, got 0")
+	}
+	// The runtime cache must also reflect what we persisted, so a later read
+	// failure cannot regress the workers.
+	runtime := svc.RuntimeSettings(context.Background())
+	if !runtime.QuotaCooldownEnabled {
+		t.Fatalf("runtime cache should reflect persisted value after Update, got %#v", runtime)
 	}
 }

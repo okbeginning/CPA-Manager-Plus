@@ -2918,6 +2918,7 @@
     "effective_label": "Effective",
     "advanced_summary": "Advanced: config field / environment variable",
     "env_locked_hint": "This switch is locked by an environment variable. Update the service environment variable and restart to change it.",
-    "env_locked_reason": "Locked by the {{envKey}} environment variable. Update it and restart the service to change this switch."
+    "env_locked_reason": "Locked by the {{envKey}} environment variable. Update it and restart the service to change this switch.",
+    "gating_note": "Disabling a switch only stops new request-monitoring events from being processed. Tasks already queued or in progress will continue to finish."
   }
 }

@@ -20,7 +20,7 @@ const (
 // interface so tests can inject failing loaders to exercise error handling.
 type settingsStore interface {
 	LoadAutomationSettings(ctx context.Context) (store.AutomationSettings, bool, error)
-	SaveAutomationSettings(ctx context.Context, settings store.AutomationSettings) error
+	SaveAutomationSettings(ctx context.Context, settings store.AutomationSettings) (store.AutomationSettings, error)
 }
 
 type Capability struct {
@@ -54,6 +54,10 @@ type Service struct {
 	mu        sync.RWMutex
 	lastKnown store.AutomationSettings
 	hasKnown  bool
+
+	// updateMu serializes the read-modify-write in Update so concurrent PATCH
+	// requests cannot overwrite each other's fields based on a stale snapshot.
+	updateMu sync.Mutex
 }
 
 func New(cfg config.Config, st ...*store.Store) *Service {
@@ -79,6 +83,12 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (Status, error)
 	if s.store == nil {
 		return Status{}, errors.New("automation settings store is not configured")
 	}
+	// Hold updateMu across the full read-modify-write so two concurrent PATCH
+	// requests (different admins / tabs / fields) cannot interleave and lose a
+	// field based on a stale snapshot.
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+
 	current, _, err := s.loadSettings(ctx)
 	if err != nil {
 		return Status{}, err
@@ -101,13 +111,18 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (Status, error)
 		}
 		current.AccountActionsAutoDisable = boolPtr(*req.AccountActionsAutoDisable)
 	}
-	if err := s.store.SaveAutomationSettings(ctx, current); err != nil {
-		return Status{}, err
-	}
-	saved, _, err := s.loadSettings(ctx)
+	// SaveAutomationSettings returns the record it persisted (including the
+	// UpdatedAtMS it assigned). We build the response from that record instead
+	// of re-reading, so a transient read failure after a successful save cannot
+	// cause the persisted state and runtime cache to diverge.
+	saved, err := s.store.SaveAutomationSettings(ctx, current)
 	if err != nil {
 		return Status{}, err
 	}
+	s.mu.Lock()
+	s.lastKnown = saved
+	s.hasKnown = true
+	s.mu.Unlock()
 	return s.statusFromSettings(saved), nil
 }
 

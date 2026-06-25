@@ -312,6 +312,7 @@ export interface CodexQuotaState {
   primaryOverSecondaryLimitPercent?: number | null;
   subscriptionActiveUntil?: string | null;
   rateLimitResetCreditsAvailableCount?: number | null;
+  fetchedAtMs?: number;
   error?: string;
   errorStatus?: number;
   observedFromUsageHeaders?: boolean;

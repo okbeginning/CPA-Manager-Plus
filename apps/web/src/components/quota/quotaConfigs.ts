@@ -20,6 +20,7 @@ import type {
 } from '@/types';
 import type { UsageHeaderSnapshot } from '@/services/api/usageService';
 import type { AntigravityQuotaData } from '@/utils/quota';
+import { IconInfo } from '@/components/ui/icons';
 import { resetCodexQuota } from '@/services/api/codexQuota';
 import {
   normalizePlanType,
@@ -60,6 +61,7 @@ export type QuotaSortMode = 'default' | 'name-asc' | 'plan-desc' | 'plan-asc';
 
 const QUOTA_PROGRESS_HIGH_THRESHOLD = 70;
 const QUOTA_PROGRESS_MEDIUM_THRESHOLD = 30;
+const CODEX_INFO_WINDOW_IDS = new Set(['five-hour', 'weekly', 'monthly']);
 export interface QuotaStore {
   antigravityQuota: Record<string, AntigravityQuotaState>;
   claudeQuota: Record<string, ClaudeQuotaState>;
@@ -278,14 +280,140 @@ export const buildObservedCodexQuotaState = (
   };
 };
 
-const formatCodexCreditsLabel = (quota: CodexQuotaState, t: TFunction): string | null => {
-  if (quota.creditsUnlimited === true) return t('codex_quota.credits_unlimited');
-  if (quota.creditsHasCredits === true) {
-    const base = t('codex_quota.credits_available');
-    return quota.creditsBalance ? `${base} ${quota.creditsBalance}` : base;
+type CodexQuotaTooltipRow = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+const formatCodexTooltipPercent = (value: number | null): string | null =>
+  value === null ? null : `${Math.round(value)}%`;
+
+const buildCodexWindowTooltipRows = (
+  quota: CodexQuotaState,
+  window: CodexQuotaWindow,
+  windowLabel: string,
+  usedPercent: number | null,
+  remainingPercent: number | null,
+  t: TFunction
+): CodexQuotaTooltipRow[] => {
+  const rows: CodexQuotaTooltipRow[] = [];
+  const usedLabel = formatCodexTooltipPercent(usedPercent);
+  const remainingLabel = formatCodexTooltipPercent(remainingPercent);
+
+  if (quota.observedFromUsageHeaders) {
+    rows.push({
+      key: 'source',
+      label: t('codex_quota.tooltip_source_label'),
+      value: t('codex_quota.tooltip_source_header'),
+    });
+
+    if (quota.observedAtMs && Number.isFinite(quota.observedAtMs)) {
+      rows.push({
+        key: 'recorded-at',
+        label: t('codex_quota.tooltip_recorded_at_label'),
+        value: new Date(quota.observedAtMs).toLocaleString(),
+      });
+    }
+  } else {
+    rows.push({
+      key: 'source',
+      label: t('codex_quota.tooltip_source_label'),
+      value: t('codex_quota.tooltip_source_api'),
+    });
+
+    if (quota.fetchedAtMs && Number.isFinite(quota.fetchedAtMs)) {
+      rows.push({
+        key: 'fetched-at',
+        label: t('codex_quota.tooltip_fetched_at_label'),
+        value: new Date(quota.fetchedAtMs).toLocaleString(),
+      });
+    }
   }
-  if (quota.creditsHasCredits === false) return t('codex_quota.credits_unavailable');
-  return quota.creditsBalance ?? null;
+
+  if (usedLabel) {
+    rows.push({
+      key: 'used',
+      label: t('codex_quota.tooltip_used_label'),
+      value: usedLabel,
+    });
+  }
+
+  if (remainingLabel) {
+    rows.push({
+      key: 'remaining',
+      label: t('codex_quota.tooltip_remaining_label'),
+      value: remainingLabel,
+    });
+  }
+
+  if (window.resetLabel && window.resetLabel !== '-') {
+    rows.push({
+      key: 'reset',
+      label: t('codex_quota.tooltip_reset_label'),
+      value: window.resetLabel,
+    });
+  }
+
+  return rows.length > 0
+    ? rows
+    : [
+        {
+          key: 'window',
+          label: t('codex_quota.tooltip_window_label'),
+          value: windowLabel,
+        },
+      ];
+};
+
+const renderCodexWindowInfo = (
+  quota: CodexQuotaState,
+  window: CodexQuotaWindow,
+  windowLabel: string,
+  usedPercent: number | null,
+  remainingPercent: number | null,
+  t: TFunction,
+  styleMap: QuotaRenderHelpers['styles']
+): ReactNode => {
+  if (!CODEX_INFO_WINDOW_IDS.has(window.id)) return null;
+
+  const { createElement: h } = React;
+  const rows = buildCodexWindowTooltipRows(
+    quota,
+    window,
+    windowLabel,
+    usedPercent,
+    remainingPercent,
+    t
+  );
+
+  return h(
+    'span',
+    {
+      className: styleMap.quotaInfoTrigger,
+      tabIndex: 0,
+      'aria-label': t('codex_quota.tooltip_label', { label: windowLabel }),
+    },
+    h(IconInfo, {
+      key: 'icon',
+      size: 14,
+      className: styleMap.quotaInfoIcon,
+      'aria-hidden': true,
+      focusable: false,
+    }),
+    h(
+      'span',
+      { key: 'tooltip', className: styleMap.quotaInfoTooltip, role: 'tooltip' },
+      ...rows.map((row) =>
+        h(
+          'span',
+          { key: row.key, className: styleMap.quotaInfoTooltipRow },
+          h('span', { className: styleMap.quotaInfoTooltipLabel }, row.label),
+          h('span', { className: styleMap.quotaInfoTooltipValue }, row.value)
+        )
+      )
+    )
+  );
 };
 
 const renderCodexItems = (
@@ -302,32 +430,7 @@ const renderCodexItems = (
   const resetCreditsAvailableCount = quota.rateLimitResetCreditsAvailableCount;
   const hasResetCreditsAvailableCount =
     typeof resetCreditsAvailableCount === 'number' && Number.isFinite(resetCreditsAvailableCount);
-  const creditsLabel = formatCodexCreditsLabel(quota, t);
-  const hasPrimaryOverSecondaryLimitPercent =
-    typeof quota.primaryOverSecondaryLimitPercent === 'number' &&
-    Number.isFinite(quota.primaryOverSecondaryLimitPercent);
   const nodes: ReactNode[] = [];
-
-  if (quota.observedFromUsageHeaders) {
-    const observedAt =
-      quota.observedAtMs && Number.isFinite(quota.observedAtMs)
-        ? new Date(quota.observedAtMs).toLocaleString()
-        : '';
-    nodes.push(
-      h(
-        'div',
-        { key: 'observed-source', className: styleMap.quotaMessage },
-        observedAt
-          ? t('quota_management.observed_from_usage_headers_at', {
-              time: observedAt,
-              defaultValue: `Observed from latest usage response headers · ${observedAt}`,
-            })
-          : t('quota_management.observed_from_usage_headers', {
-              defaultValue: 'Observed from latest usage response headers',
-            })
-      )
-    );
-  }
 
   if (planLabel || hasResetCreditsAvailableCount || quota.observedResetCreditsUnknown) {
     const valueClass = isPremiumPlan ? styleMap.premiumPlanValue : styleMap.codexPlanValue;
@@ -369,90 +472,6 @@ const renderCodexItems = (
     nodes.push(h('div', { key: 'plan', className: styleMap.codexPlan }, ...planNodes));
   }
 
-  if (quota.activeLimit || creditsLabel) {
-    const metaNodes: ReactNode[] = [];
-
-    if (quota.activeLimit) {
-      metaNodes.push(
-        h(
-          'span',
-          { key: 'active-limit-label', className: styleMap.codexPlanLabel },
-          t('codex_quota.active_limit_label')
-        ),
-        h(
-          'span',
-          { key: 'active-limit-value', className: styleMap.codexPlanValue },
-          quota.activeLimit
-        )
-      );
-    }
-
-    if (creditsLabel) {
-      if (metaNodes.length > 0) {
-        metaNodes.push(
-          h('span', { key: 'credits-separator', className: styleMap.codexPlanLabel }, '|')
-        );
-      }
-      metaNodes.push(
-        h(
-          'span',
-          { key: 'credits-label', className: styleMap.codexPlanLabel },
-          t('codex_quota.credits_label')
-        ),
-        h('span', { key: 'credits-value', className: styleMap.codexPlanValue }, creditsLabel)
-      );
-    }
-
-    nodes.push(h('div', { key: 'header-quota-meta', className: styleMap.codexPlan }, ...metaNodes));
-  }
-
-  if (quota.rateLimitReachedType || hasPrimaryOverSecondaryLimitPercent) {
-    const limitNodes: ReactNode[] = [];
-
-    if (quota.rateLimitReachedType) {
-      limitNodes.push(
-        h(
-          'span',
-          { key: 'reached-type-label', className: styleMap.codexPlanLabel },
-          t('codex_quota.rate_limit_reached_type_label')
-        ),
-        h(
-          'span',
-          { key: 'reached-type-value', className: styleMap.codexPlanValue },
-          quota.rateLimitReachedType
-        )
-      );
-    }
-
-    if (hasPrimaryOverSecondaryLimitPercent) {
-      if (limitNodes.length > 0) {
-        limitNodes.push(
-          h(
-            'span',
-            { key: 'primary-over-secondary-separator', className: styleMap.codexPlanLabel },
-            '|'
-          )
-        );
-      }
-      limitNodes.push(
-        h(
-          'span',
-          { key: 'primary-over-secondary-label', className: styleMap.codexPlanLabel },
-          t('codex_quota.primary_over_secondary_limit_label')
-        ),
-        h(
-          'span',
-          { key: 'primary-over-secondary-value', className: styleMap.codexPlanValue },
-          `${quota.primaryOverSecondaryLimitPercent}%`
-        )
-      );
-    }
-
-    nodes.push(
-      h('div', { key: 'header-limit-meta', className: styleMap.codexPlan }, ...limitNodes)
-    );
-  }
-
   if (windows.length === 0) {
     nodes.push(
       h('div', { key: 'empty', className: styleMap.quotaMessage }, t('codex_quota.empty_windows'))
@@ -469,6 +488,15 @@ const renderCodexItems = (
       const windowLabel = window.labelKey
         ? t(window.labelKey, window.labelParams as Record<string, string | number>)
         : window.label;
+      const infoIcon = renderCodexWindowInfo(
+        quota,
+        window,
+        windowLabel,
+        clampedUsed,
+        remaining,
+        t,
+        styleMap
+      );
 
       return h(
         'div',
@@ -476,7 +504,12 @@ const renderCodexItems = (
         h(
           'div',
           { className: styleMap.quotaRowHeader },
-          h('span', { className: styleMap.quotaModel }, windowLabel),
+          h(
+            'span',
+            { className: styleMap.quotaWindowLabel },
+            h('span', { className: styleMap.quotaModel }, windowLabel),
+            infoIcon
+          ),
           h(
             'div',
             { className: styleMap.quotaMeta },
@@ -654,6 +687,7 @@ export const CODEX_CONFIG: QuotaConfig<
     planType: data.planType,
     subscriptionActiveUntil: data.subscriptionActiveUntil,
     rateLimitResetCreditsAvailableCount: data.rateLimitResetCreditsAvailableCount,
+    fetchedAtMs: Date.now(),
   }),
   buildErrorState: (message, status) => ({
     status: 'error',

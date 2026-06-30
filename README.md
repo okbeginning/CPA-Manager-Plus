@@ -13,7 +13,7 @@ A self-hosted dashboard for monitoring AI gateway traffic: requests, cost, failu
 
 Works with [CPA / CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) and OpenAI-compatible gateways that serve Codex, Claude Code, or similar tools.
 
-[Live demo](https://seakee.github.io/CPA-Manager-Plus/) is available after the GitHub Pages demo workflow is deployed.
+[Live demo](https://seakee.github.io/CPA-Manager-Plus/)
 
 </div>
 
@@ -142,7 +142,7 @@ CPAMP can also run as a CPA-hosted panel on `:8317`, or as a standalone frontend
 
 | Topic | Guide |
 |---|---|
-| Demo site | [GitHub Pages demo](https://seakee.github.io/CPA-Manager-Plus/) after the demo workflow is deployed |
+| Demo site | [Live demo](https://seakee.github.io/CPA-Manager-Plus/) |
 | Start here | [Wiki Home](https://github.com/seakee/CPA-Manager-Plus/wiki) |
 | Docker deployment | [Docker Deployment](https://github.com/seakee/CPA-Manager-Plus/wiki/Docker-Deployment) |
 | Native packages | [Native Binary Deployment](https://github.com/seakee/CPA-Manager-Plus/wiki/Native-Binary-Deployment) |

@@ -416,7 +416,9 @@ describe('native control scripts', () => {
         '-Command',
         [
           `foreach ($path in @(${[pidFile, logFile, errLogFile].map(psQuote).join(', ')})) {`,
-          '  if (-not (Get-Acl -LiteralPath $path).AreAccessRulesProtected) { throw "ACL is not protected: $path" }',
+          '  $item = Get-Item -LiteralPath $path -Force;',
+          '  $acl = [System.IO.File]::GetAccessControl($item.FullName);',
+          '  if (-not $acl.AreAccessRulesProtected) { throw "ACL is not protected: $path" }',
           '}',
         ].join(' '),
       ]);
@@ -459,11 +461,12 @@ describe('native control scripts', () => {
       '-Command',
       [
         `$path = ${psQuote(unsafeDir)}`,
-        '$acl = Get-Acl -LiteralPath $path',
+        '$item = Get-Item -LiteralPath $path -Force',
+        '$acl = [System.IO.Directory]::GetAccessControl($item.FullName)',
         '$users = New-Object System.Security.Principal.SecurityIdentifier "S-1-5-32-545"',
         '$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($users, "Modify", "ContainerInherit, ObjectInherit", "None", "Allow")',
         '$acl.AddAccessRule($rule)',
-        'Set-Acl -LiteralPath $path -AclObject $acl',
+        '[System.IO.Directory]::SetAccessControl($item.FullName, $acl)',
       ].join('; '),
     ]);
 

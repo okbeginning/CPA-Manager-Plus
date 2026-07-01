@@ -91,7 +91,7 @@ function Test-UnsafeWritableDirectoryAcl {
     Get-WellKnownSidValue -Type ([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid)
   )
   $unsafeRights = [System.Security.AccessControl.FileSystemRights]'Write, WriteData, CreateFiles, AppendData, CreateDirectories, Delete, DeleteSubdirectoriesAndFiles, Modify, FullControl, ChangePermissions, TakeOwnership'
-  $acl = Get-Acl -LiteralPath $Path
+  $acl = [System.IO.Directory]::GetAccessControl($Path)
 
   foreach ($rule in $acl.Access) {
     if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) {
@@ -180,7 +180,11 @@ function Set-PrivateAcl {
     [System.Security.AccessControl.AccessControlType]::Allow
   )
   [void]$acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $Path -AclObject $acl
+  if ($Directory) {
+    [System.IO.Directory]::SetAccessControl($Path, $acl)
+  } else {
+    [System.IO.File]::SetAccessControl($Path, $acl)
+  }
 }
 
 function Ensure-PrivateDirectory {

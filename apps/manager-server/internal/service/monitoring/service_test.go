@@ -313,6 +313,65 @@ func TestCacheHitRateMatchesWebClient(t *testing.T) {
 	if r := cacheHitRate(TimelinePoint{InputTokens: 10, CachedTokens: 1000}); r != 1 {
 		t.Fatalf("clamped cache hit rate = %v, want 1", r)
 	}
+
+	gpt56 := cacheHitRateForModelStats([]store.ModelStat{{
+		Model:               "alias-fast",
+		BillingModel:        "openai/gpt-5.6-sol",
+		InputTokens:         152_600,
+		CacheReadTokens:     151_000,
+		CacheCreationTokens: 1_000,
+	}})
+	if math.Abs(gpt56-151_000.0/152_600.0) > 1e-9 {
+		t.Fatalf("gpt-5.6 cache hit rate = %v, want %v", gpt56, 151_000.0/152_600.0)
+	}
+	timeline := buildTimeline([]store.TimelinePoint{{
+		BucketMS:            1_000,
+		Model:               "alias-fast",
+		BillingModel:        "openai/gpt-5.6-sol",
+		Calls:               1,
+		Success:             1,
+		InputTokens:         152_600,
+		CacheReadTokens:     151_000,
+		CacheCreationTokens: 1_000,
+	}}, nil, "hour", time.UTC, nil)
+	if len(timeline) != 1 || math.Abs(timeline[0].CacheHitRate-151_000.0/152_600.0) > 1e-9 {
+		t.Fatalf("gpt-5.6 timeline cache hit rate = %#v", timeline)
+	}
+}
+
+func TestModelCacheHitRateUsesBillingModelBeforeAliasAggregation(t *testing.T) {
+	stats := []store.ModelStat{
+		{
+			Model:           "internal-fast",
+			BillingModel:    "openai/gpt-5.6-sol",
+			Calls:           1,
+			SuccessCalls:    1,
+			InputTokens:     100,
+			CacheReadTokens: 90,
+		},
+		{
+			Model:               "internal-fast",
+			BillingModel:        "claude-sonnet-4",
+			Calls:               1,
+			SuccessCalls:        1,
+			InputTokens:         100,
+			CacheReadTokens:     50,
+			CacheCreationTokens: 50,
+		},
+	}
+
+	rows := buildModelStats(stats, nil)
+	if len(rows) != 1 || rows[0].CacheHitTokens != 140 || rows[0].CacheHitInputTokens != 300 ||
+		math.Abs(rows[0].CacheHitRate-140.0/300.0) > 1e-9 {
+		t.Fatalf("model cache hit metrics = %#v", rows)
+	}
+
+	models := map[string]*AccountModelStatRow{}
+	addAccountModelStat(models, "internal-fast", "openai/gpt-5.6-sol", 1, 1, 0, 100, 0, 0, 90, 0, 100, 0, 1)
+	if model := models["internal-fast"]; model == nil || model.CacheHitInputTokens != 100 ||
+		math.Abs(model.CacheHitRate-0.9) > 1e-9 {
+		t.Fatalf("account model cache hit metrics = %#v", model)
+	}
 }
 
 func TestAnalyticsExposesCPA7118UsageFields(t *testing.T) {

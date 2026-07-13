@@ -187,6 +187,47 @@ func CompatibleCachedTokens(cachedTokens, cacheTokens, cacheReadTokens, cacheCre
 	return cached - fineGrained
 }
 
+// CacheHitTotals normalizes cache-hit metrics across provider token semantics.
+// GPT-5.6 reports fine-grained cache read/write tokens inside input_tokens,
+// while Anthropic reports them outside input_tokens. Legacy OpenAI-style
+// payloads expose only cached_tokens, which is already included in input_tokens.
+func CacheHitTotals(modelName string, inputTokens, cachedTokens, cacheReadTokens, cacheCreationTokens int64) (int64, int64) {
+	input := maxInt64(inputTokens, 0)
+	cached := maxInt64(cachedTokens, 0)
+	cacheRead := maxInt64(cacheReadTokens, 0)
+	cacheCreation := maxInt64(cacheCreationTokens, 0)
+	hitTokens := cached + cacheRead
+	totalInput := input
+	if (cacheRead > 0 || cacheCreation > 0) && !fineGrainedCacheIncludedInInput(modelName) {
+		totalInput += cacheRead + cacheCreation
+	}
+	return hitTokens, totalInput
+}
+
+func CacheHitRate(modelName string, inputTokens, cachedTokens, cacheReadTokens, cacheCreationTokens int64) float64 {
+	hitTokens, totalInput := CacheHitTotals(modelName, inputTokens, cachedTokens, cacheReadTokens, cacheCreationTokens)
+	return CacheHitRateFromTotals(hitTokens, totalInput)
+}
+
+func CacheHitRateFromTotals(hitTokens, inputTokens int64) float64 {
+	if inputTokens <= 0 {
+		return 0
+	}
+	rate := float64(maxInt64(hitTokens, 0)) / float64(inputTokens)
+	if rate > 1 {
+		return 1
+	}
+	return rate
+}
+
+func fineGrainedCacheIncludedInInput(modelName string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(modelName))
+	if index := strings.LastIndex(normalized, "/"); index >= 0 {
+		normalized = normalized[index+1:]
+	}
+	return normalized == "gpt-5.6" || strings.HasPrefix(normalized, "gpt-5.6-")
+}
+
 func NormalizeRaw(raw []byte) (Event, error) {
 	var payload any
 	if err := json.Unmarshal(raw, &payload); err != nil {

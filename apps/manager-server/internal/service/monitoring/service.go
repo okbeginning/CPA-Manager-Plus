@@ -197,6 +197,7 @@ type Summary struct {
 	CachedTokens          int64    `json:"cached_tokens"`
 	CacheReadTokens       int64    `json:"cache_read_tokens"`
 	CacheCreationTokens   int64    `json:"cache_creation_tokens"`
+	CacheHitRate          float64  `json:"cache_hit_rate"`
 	ReasoningTokens       int64    `json:"reasoning_tokens"`
 	TotalTokens           int64    `json:"total_tokens"`
 	TotalCost             float64  `json:"total_cost"`
@@ -242,6 +243,7 @@ type TimelinePoint struct {
 	CachedTokens        int64    `json:"cached_tokens"`
 	CacheReadTokens     int64    `json:"cache_read_tokens"`
 	CacheCreationTokens int64    `json:"cache_creation_tokens"`
+	CacheHitRate        float64  `json:"cache_hit_rate"`
 	ReasoningTokens     int64    `json:"reasoning_tokens"`
 	TotalTokens         int64    `json:"total_tokens"`
 	Cost                float64  `json:"cost"`
@@ -320,6 +322,9 @@ type ModelStat struct {
 	CachedTokens        int64   `json:"cached_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheHitTokens      int64   `json:"cache_hit_tokens"`
+	CacheHitInputTokens int64   `json:"cache_hit_input_tokens"`
+	CacheHitRate        float64 `json:"cache_hit_rate"`
 	TotalTokens         int64   `json:"total_tokens"`
 	Cost                float64 `json:"cost"`
 }
@@ -442,6 +447,9 @@ type AccountModelStatRow struct {
 	CachedTokens        int64   `json:"cached_tokens"`
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheHitTokens      int64   `json:"cache_hit_tokens"`
+	CacheHitInputTokens int64   `json:"cache_hit_input_tokens"`
+	CacheHitRate        float64 `json:"cache_hit_rate"`
 	TotalTokens         int64   `json:"total_tokens"`
 	Cost                float64 `json:"cost"`
 	LastSeenMS          int64   `json:"last_seen_ms"`
@@ -1228,6 +1236,7 @@ func buildSummary(agg store.Aggregate, latencySummary store.LatencySummary, roll
 		CachedTokens:          agg.CachedTokens,
 		CacheReadTokens:       agg.CacheReadTokens,
 		CacheCreationTokens:   agg.CacheCreationTokens,
+		CacheHitRate:          cacheHitRateForModelStats(modelStats),
 		ReasoningTokens:       agg.ReasoningTokens,
 		TotalTokens:           agg.TotalTokens,
 		TotalCost:             totalCost,
@@ -1249,9 +1258,11 @@ func buildSummary(agg store.Aggregate, latencySummary store.LatencySummary, roll
 
 func buildTimeline(points []store.TimelinePoint, percentiles []store.LatencyPercentiles, granularity string, location *time.Location, prices map[string]store.ModelPrice) []TimelinePoint {
 	type bucketAccumulator struct {
-		point         TimelinePoint
-		latencyTotal  float64
-		latencySample int64
+		point               TimelinePoint
+		cacheHitTokens      int64
+		cacheHitInputTokens int64
+		latencyTotal        float64
+		latencySample       int64
 	}
 	buckets := make(map[int64]*bucketAccumulator, len(points))
 	order := make([]int64, 0, len(points))
@@ -1279,6 +1290,19 @@ func buildTimeline(points []store.TimelinePoint, percentiles []store.LatencyPerc
 		bucket.point.CacheCreationTokens += point.CacheCreationTokens
 		bucket.point.ReasoningTokens += point.ReasoningTokens
 		bucket.point.Cost += costForTimelinePoint(point, prices)
+		behaviorModel := point.BillingModel
+		if strings.TrimSpace(behaviorModel) == "" {
+			behaviorModel = point.Model
+		}
+		cacheHitTokens, cacheHitInputTokens := usage.CacheHitTotals(
+			behaviorModel,
+			point.InputTokens,
+			point.CachedTokens,
+			point.CacheReadTokens,
+			point.CacheCreationTokens,
+		)
+		bucket.cacheHitTokens += cacheHitTokens
+		bucket.cacheHitInputTokens += cacheHitInputTokens
 		if point.AvgLatencyMS.Valid && point.LatencySamples > 0 {
 			bucket.latencyTotal += point.AvgLatencyMS.Float64 * float64(point.LatencySamples)
 			bucket.latencySample += point.LatencySamples
@@ -1293,6 +1317,7 @@ func buildTimeline(points []store.TimelinePoint, percentiles []store.LatencyPerc
 		}
 		bucket.point.SuccessRate = ratio(bucket.point.Success, bucket.point.Calls)
 		bucket.point.FailureRate = ratio(bucket.point.Failure, bucket.point.Calls)
+		bucket.point.CacheHitRate = usage.CacheHitRateFromTotals(bucket.cacheHitTokens, bucket.cacheHitInputTokens)
 		result = append(result, bucket.point)
 	}
 	percentilesByBucket := make(map[int64]store.LatencyPercentiles, len(percentiles))
@@ -1527,6 +1552,9 @@ func buildModelStats(stats []store.ModelStat, prices map[string]store.ModelPrice
 			CachedTokens:        stat.CachedTokens,
 			CacheReadTokens:     stat.CacheReadTokens,
 			CacheCreationTokens: stat.CacheCreationTokens,
+			CacheHitTokens:      stat.CacheHitTokens,
+			CacheHitInputTokens: stat.CacheHitInputTokens,
+			CacheHitRate:        usage.CacheHitRateFromTotals(stat.CacheHitTokens, stat.CacheHitInputTokens),
 			TotalTokens:         stat.TotalTokens,
 			Cost:                stat.Cost,
 		})
@@ -1543,6 +1571,8 @@ type aggregatedModelStat struct {
 	CachedTokens        int64
 	CacheReadTokens     int64
 	CacheCreationTokens int64
+	CacheHitTokens      int64
+	CacheHitInputTokens int64
 	TotalTokens         int64
 	Cost                float64
 }
@@ -1564,6 +1594,19 @@ func aggregateModelStats(stats []store.ModelStat, prices map[string]store.ModelP
 		entry.CachedTokens += stat.CachedTokens
 		entry.CacheReadTokens += stat.CacheReadTokens
 		entry.CacheCreationTokens += stat.CacheCreationTokens
+		behaviorModel := stat.BillingModel
+		if strings.TrimSpace(behaviorModel) == "" {
+			behaviorModel = stat.Model
+		}
+		cacheHitTokens, cacheHitInputTokens := usage.CacheHitTotals(
+			behaviorModel,
+			stat.InputTokens,
+			stat.CachedTokens,
+			stat.CacheReadTokens,
+			stat.CacheCreationTokens,
+		)
+		entry.CacheHitTokens += cacheHitTokens
+		entry.CacheHitInputTokens += cacheHitInputTokens
 		entry.TotalTokens += stat.TotalTokens
 		entry.Cost += costForStat(stat, prices)
 	}
@@ -1729,7 +1772,7 @@ func buildAccountStats(stats []store.AccountModelStat, prices map[string]store.M
 			entry.latencySum += stat.AvgLatencyMS.Float64 * float64(stat.LatencySamples)
 			entry.latencySamples += stat.LatencySamples
 		}
-		addAccountModelStat(entry.models, stat.Model, stat.Calls, stat.SuccessCalls, stat.FailureCalls, stat.InputTokens, stat.OutputTokens, stat.CachedTokens, stat.CacheReadTokens, stat.CacheCreationTokens, stat.TotalTokens, cost, stat.LastSeenMS)
+		addAccountModelStat(entry.models, stat.Model, stat.BillingModel, stat.Calls, stat.SuccessCalls, stat.FailureCalls, stat.InputTokens, stat.OutputTokens, stat.CachedTokens, stat.CacheReadTokens, stat.CacheCreationTokens, stat.TotalTokens, cost, stat.LastSeenMS)
 	}
 
 	result := make([]AccountStatRow, 0, len(grouped))
@@ -1806,7 +1849,7 @@ func buildCredentialStats(stats []store.CredentialModelStat, prices map[string]s
 			entry.latencySum += stat.AvgLatencyMS.Float64 * float64(stat.LatencySamples)
 			entry.latencySamples += stat.LatencySamples
 		}
-		addAccountModelStat(entry.models, stat.Model, stat.Calls, stat.SuccessCalls, stat.FailureCalls, stat.InputTokens, stat.OutputTokens, stat.CachedTokens, stat.CacheReadTokens, stat.CacheCreationTokens, stat.TotalTokens, cost, stat.LastSeenMS)
+		addAccountModelStat(entry.models, stat.Model, stat.BillingModel, stat.Calls, stat.SuccessCalls, stat.FailureCalls, stat.InputTokens, stat.OutputTokens, stat.CachedTokens, stat.CacheReadTokens, stat.CacheCreationTokens, stat.TotalTokens, cost, stat.LastSeenMS)
 	}
 
 	result := make([]CredentialStatRow, 0, len(grouped))
@@ -1954,7 +1997,7 @@ func buildAPIKeyStats(stats []store.APIKeyModelStat, prices map[string]store.Mod
 			entry.latencySamples += stat.LatencySamples
 		}
 		addAPIKeyContextStat(entry.contexts, stat, cost)
-		addAccountModelStat(entry.models, stat.Model, stat.Calls, stat.SuccessCalls, stat.FailureCalls, stat.InputTokens, stat.OutputTokens, stat.CachedTokens, stat.CacheReadTokens, stat.CacheCreationTokens, stat.TotalTokens, cost, stat.LastSeenMS)
+		addAccountModelStat(entry.models, stat.Model, stat.BillingModel, stat.Calls, stat.SuccessCalls, stat.FailureCalls, stat.InputTokens, stat.OutputTokens, stat.CachedTokens, stat.CacheReadTokens, stat.CacheCreationTokens, stat.TotalTokens, cost, stat.LastSeenMS)
 	}
 
 	result := make([]APIKeyStatRow, 0, len(grouped))
@@ -2200,6 +2243,7 @@ func addAccountTotals(
 func addAccountModelStat(
 	models map[string]*AccountModelStatRow,
 	model string,
+	billingModel string,
 	calls int64,
 	successCalls int64,
 	failureCalls int64,
@@ -2229,6 +2273,20 @@ func addAccountModelStat(
 	entry.CachedTokens += cachedTokens
 	entry.CacheReadTokens += cacheReadTokens
 	entry.CacheCreationTokens += cacheCreationTokens
+	behaviorModel := billingModel
+	if strings.TrimSpace(behaviorModel) == "" {
+		behaviorModel = modelKey
+	}
+	cacheHitTokens, cacheHitInputTokens := usage.CacheHitTotals(
+		behaviorModel,
+		inputTokens,
+		cachedTokens,
+		cacheReadTokens,
+		cacheCreationTokens,
+	)
+	entry.CacheHitTokens += cacheHitTokens
+	entry.CacheHitInputTokens += cacheHitInputTokens
+	entry.CacheHitRate = usage.CacheHitRateFromTotals(entry.CacheHitTokens, entry.CacheHitInputTokens)
 	entry.TotalTokens += totalTokens
 	entry.Cost += cost
 	if lastSeenMS > entry.LastSeenMS {
@@ -2697,23 +2755,35 @@ func averageTokensPerRequest(point TimelinePoint) float64 {
 }
 
 func cacheHitRate(point TimelinePoint) float64 {
-	// Mirror computeCacheHitRate on the web client: cache-read tokens over total
-	// input. cacheRead falls back to cachedTokens for OpenAI-style usage (input
-	// already includes cache); totalInput adds cacheRead/cacheCreation back for
-	// Anthropic-style usage where InputTokens excludes them.
-	cacheRead := point.CacheReadTokens
-	if cacheRead == 0 {
-		cacheRead = point.CachedTokens
+	rate := point.CacheHitRate
+	if rate <= 0 {
+		rate = usage.CacheHitRate("", point.InputTokens, point.CachedTokens, point.CacheReadTokens, point.CacheCreationTokens)
 	}
-	totalInput := point.InputTokens + point.CacheReadTokens + point.CacheCreationTokens
-	if totalInput <= 0 {
-		return 0
-	}
-	rate := float64(cacheRead) / float64(totalInput)
 	if rate > 1 {
 		return 1
 	}
 	return rate
+}
+
+func cacheHitRateForModelStats(stats []store.ModelStat) float64 {
+	var hitTokens int64
+	var inputTokens int64
+	for _, stat := range stats {
+		behaviorModel := stat.BillingModel
+		if strings.TrimSpace(behaviorModel) == "" {
+			behaviorModel = stat.Model
+		}
+		statHitTokens, statInputTokens := usage.CacheHitTotals(
+			behaviorModel,
+			stat.InputTokens,
+			stat.CachedTokens,
+			stat.CacheReadTokens,
+			stat.CacheCreationTokens,
+		)
+		hitTokens += statHitTokens
+		inputTokens += statInputTokens
+	}
+	return usage.CacheHitRateFromTotals(hitTokens, inputTokens)
 }
 
 func floatValueOrZero(value *float64) float64 {

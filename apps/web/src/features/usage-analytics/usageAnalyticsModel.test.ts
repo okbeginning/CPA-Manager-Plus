@@ -1150,10 +1150,10 @@ describe('usage analytics adapters', () => {
 });
 
 describe('cache hit rate', () => {
-  it('uses total input (input + cacheRead + cacheCreation) as the denominator for Anthropic usage', () => {
+  it('uses normalized total input as the denominator for Anthropic usage', () => {
     expect(
       computeCacheHitRate({
-        inputTokens: 100,
+        inputTokens: 450,
         cacheReadTokens: 300,
         cacheCreationTokens: 50,
         cachedTokens: 0,
@@ -1227,7 +1227,7 @@ describe('model rank derivations', () => {
   it('derives per-row cache hit rate and average cost per call', () => {
     const row = rankRow({
       requestCount: 50,
-      inputTokens: 100,
+      inputTokens: 450,
       cacheReadTokens: 300,
       cacheCreationTokens: 50,
       estimatedCost: 10,

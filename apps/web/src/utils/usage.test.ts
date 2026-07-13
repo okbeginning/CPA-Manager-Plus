@@ -306,7 +306,7 @@ describe('usage token helpers', () => {
     expect(
       calculateCacheHitRate({
         modelName: 'claude-sonnet-4',
-        inputTokens: 100,
+        inputTokens: 450,
         cachedTokens: 0,
         cacheReadTokens: 300,
         cacheCreationTokens: 50,
@@ -380,24 +380,24 @@ describe('calculateCost model price preference', () => {
   it('prefers resolved upstream model when present', () => {
     const cost = calculateCost(
       {
-        tokens: { input_tokens: 1_000_000, output_tokens: 0 },
+        tokens: { input_tokens: 100_000, output_tokens: 0 },
         __modelName: 'gpt-5.4',
         __resolvedModel: 'gpt-5.5',
       },
       prices
     );
-    expect(cost).toBeCloseTo(5);
+    expect(cost).toBeCloseTo(0.5);
   });
 
   it('falls back to requested alias when resolved is absent', () => {
     const cost = calculateCost(
       {
-        tokens: { input_tokens: 1_000_000, output_tokens: 0 },
+        tokens: { input_tokens: 100_000, output_tokens: 0 },
         __modelName: 'gpt-5.4',
       },
       prices
     );
-    expect(cost).toBeCloseTo(50);
+    expect(cost).toBeCloseTo(5);
   });
 
   it('falls back to requested alias when resolved has no price entry', () => {
@@ -430,9 +430,9 @@ describe('calculateCost model price preference', () => {
     const cost = calculateCost(
       {
         tokens: {
-          input_tokens: 1_000_000,
-          output_tokens: 500_000,
-          cached_tokens: 250_000,
+          input_tokens: 100_000,
+          output_tokens: 50_000,
+          cached_tokens: 25_000,
         },
         __modelName: 'gpt-5.5',
       },
@@ -440,14 +440,14 @@ describe('calculateCost model price preference', () => {
         'gpt-5.5': { prompt: 2, completion: 4, cache: 1 },
       }
     );
-    expect(cost).toBeCloseTo(3.75);
+    expect(cost).toBeCloseTo(0.375);
   });
 
   it('prices fine-grained cache buckets outside input while preserving residual cached input', () => {
     const cost = calculateCost(
       {
         tokens: {
-          input_tokens: 1_000_000,
+          input_tokens: 1_300_000,
           cached_tokens: 100_000,
           cache_read_tokens: 200_000,
           cache_creation_tokens: 100_000,
@@ -471,7 +471,7 @@ describe('calculateCost model price preference', () => {
   it('applies gpt-5.4 priority service tier multiplier', () => {
     const cost = calculateCost(
       {
-        tokens: { input_tokens: 1_000_000 },
+        tokens: { input_tokens: 100_000 },
         __modelName: 'gpt-5.4',
         service_tier: 'priority',
       },
@@ -480,13 +480,13 @@ describe('calculateCost model price preference', () => {
       }
     );
 
-    expect(cost).toBeCloseTo(5);
+    expect(cost).toBeCloseTo(0.5);
   });
 
   it('applies gpt-5.5 priority service tier multiplier', () => {
     const cost = calculateCost(
       {
-        tokens: { input_tokens: 1_000_000 },
+        tokens: { input_tokens: 100_000 },
         __modelName: 'gpt-5.5',
         serviceTier: 'priority',
       },
@@ -495,7 +495,42 @@ describe('calculateCost model price preference', () => {
       }
     );
 
-    expect(cost).toBeCloseTo(5);
+    expect(cost).toBeCloseTo(0.5);
+  });
+
+  it('uses the response service tier for billing', () => {
+    const cost = calculateCost(
+      {
+        tokens: { input_tokens: 100_000 },
+        __modelName: 'gpt-5.4',
+        request_service_tier: 'priority',
+        response_service_tier: 'default',
+      },
+      { 'gpt-5.4': { prompt: 2.5, completion: 5, cache: 1 } }
+    );
+    expect(cost).toBeCloseTo(0.25);
+  });
+
+  it('does not stack priority pricing with long-context pricing', () => {
+    const modelPrices = { 'gpt-5.5': { prompt: 2, completion: 4, cache: 1 } };
+    const tokens = { input_tokens: 1_000_000, output_tokens: 100_000 };
+    const standard = calculateCost(
+      { tokens, __modelName: 'gpt-5.5', service_tier: 'default' },
+      modelPrices
+    );
+    const priority = calculateCost(
+      { tokens, __modelName: 'gpt-5.5', service_tier: 'priority' },
+      modelPrices
+    );
+    expect(priority).toBeCloseTo(standard);
+  });
+
+  it('uses flex pricing at half the standard rate', () => {
+    const cost = calculateCost(
+      { tokens: { input_tokens: 100_000 }, __modelName: 'gpt-5.5', service_tier: 'flex' },
+      { 'gpt-5.5': { prompt: 2, completion: 4, cache: 1 } }
+    );
+    expect(cost).toBeCloseTo(0.1);
   });
 
   it('keeps default and missing service tier at standard cost', () => {
@@ -512,7 +547,7 @@ describe('calculateCost model price preference', () => {
         },
         modelPrices
       )
-    ).toBeCloseTo(2.5);
+    ).toBeCloseTo(5);
     expect(
       calculateCost(
         {
@@ -521,7 +556,7 @@ describe('calculateCost model price preference', () => {
         },
         modelPrices
       )
-    ).toBeCloseTo(2.5);
+    ).toBeCloseTo(5);
   });
 
   it('uses official gpt-5.6 prices when the current price book has no entry', () => {
@@ -632,18 +667,17 @@ describe('calculateCost model price preference', () => {
     const cost = calculateCost(
       {
         tokens: {
-          input_tokens: 1_000_000,
-          output_tokens: 100_000,
-          cache_read_tokens: 200_000,
+          input_tokens: 250_000,
+          cache_read_tokens: 150_000,
           cache_creation_tokens: 100_000,
         },
         __modelName: 'gpt-5.6-sol',
       },
       {
         'gpt-5.6-sol': {
-          prompt: 0,
-          completion: 0,
-          cache: 0,
+          prompt: 5,
+          completion: 30,
+          cache: 0.5,
           cacheRead: 0,
           cacheCreation: 0,
           promptConfigured: true,

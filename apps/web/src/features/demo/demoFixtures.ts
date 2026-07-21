@@ -3247,10 +3247,35 @@ export const getDemoConfigYaml = () =>
     '  enabled: true',
   ].join('\n');
 
+const DEMO_FORBIDDEN_API_HOST = 'forbidden.demo.invalid';
+
+const isDemoForbiddenApiCall = (requestUrl: string): boolean => {
+  try {
+    return new URL(requestUrl).hostname === DEMO_FORBIDDEN_API_HOST;
+  } catch {
+    return false;
+  }
+};
+
 export const getDemoApiCallResult = (payload: DemoApiCallPayload = {}) => {
   const requestUrl = String(payload.url || '');
   const authIndex = String(payload.authIndex || '');
   const isCodexPro20x = authIndex === 'codex-pro-20x-01';
+
+  if (isDemoForbiddenApiCall(requestUrl)) {
+    return {
+      status_code: 401,
+      has_status_code: true,
+      header: {
+        'access-control-allow-origin': ['*'],
+        'content-type': ['application/json'],
+        date: [new Date().toUTCString()],
+        'x-request-id': ['demo-forbidden-request'],
+      },
+      body: JSON.stringify({ error: { code: 16, message: 'Forbidden' } }),
+    };
+  }
+
   let body: unknown = { data: demoProviderModels.map((model) => ({ id: model.name })) };
 
   if (requestUrl.includes('/wham/usage')) {

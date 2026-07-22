@@ -9,6 +9,7 @@ import {
   getDemoCodexInspectionLocalRun,
   getDemoProviderModels,
   getDemoRawConfig,
+  resetDemoCredentialRefresh,
 } from '@/features/demo/demoFixtures';
 import {
   CODEX_INSPECTION_LAST_RUN_STORAGE_KEY,
@@ -143,6 +144,7 @@ export function DemoPage() {
     const restoreDemoPersistIsolation = enableDemoPersistIsolation();
     const restoreDemoInspectionState = installDemoInspectionState();
 
+    resetDemoCredentialRefresh();
     setDemoMode(true);
     apiClient.setConfig({
       apiBase: DEMO_API_BASE,
@@ -187,6 +189,7 @@ export function DemoPage() {
     }));
 
     return () => {
+      resetDemoCredentialRefresh();
       setDemoMode(false);
       useAuthStore.setState(authSnapshot);
       useConfigStore.setState(configSnapshot);

@@ -5,7 +5,6 @@ import {
   getDemoAccountProcessingPolicy,
   getDemoApiKeyAliases,
   getDemoCodexInspectionRun,
-  getDemoCodexInspectionRuns,
   getDemoDashboardSummary,
   getDemoHeaderSnapshots,
   getDemoManagerConfig,
@@ -1481,37 +1480,301 @@ const getDemoPatchedAccountProcessingPolicy = (
   };
 };
 
+const createDemoCodexInspectionError = (message: string, status: number): UsageServiceApiError => {
+  const details = { error: message, code: 'request_failed' };
+  const error = new Error(message) as UsageServiceApiError;
+  error.name = 'UsageServiceApiError';
+  error.status = status;
+  error.code = 'request_failed';
+  error.details = details;
+  error.data = details;
+  return error;
+};
+
+const cloneDemoCodexInspectionDetail = (
+  detail: CodexInspectionRunDetail
+): CodexInspectionRunDetail => JSON.parse(JSON.stringify(detail)) as CodexInspectionRunDetail;
+
+let demoCodexInspectionRunState: CodexInspectionRunDetail | null = null;
+
+export const resetDemoCodexInspectionRunState = () => {
+  demoCodexInspectionRunState = null;
+};
+
+const readDemoCodexInspectionRunState = (): CodexInspectionRunDetail => {
+  if (!demoCodexInspectionRunState) {
+    demoCodexInspectionRunState = getDemoCodexInspectionRun();
+  }
+  return cloneDemoCodexInspectionDetail(demoCodexInspectionRunState);
+};
+
+const replaceDemoCodexInspectionRunState = (
+  detail: CodexInspectionRunDetail
+): CodexInspectionRunDetail => {
+  demoCodexInspectionRunState = cloneDemoCodexInspectionDetail(detail);
+  return cloneDemoCodexInspectionDetail(demoCodexInspectionRunState);
+};
+
 const getDemoCodexInspectionActionsResponse = (
+  runId: number,
   resultIds: number[],
   actionOverrides: CodexInspectionActionOverride[] = []
 ): CodexInspectionActionsResponse => {
-  const detail = getDemoCodexInspectionRun();
-  const overrideByID = new Map(actionOverrides.map((item) => [item.resultId, item.action]));
-  const selected = resultIds.length
-    ? detail.results.filter((result) => resultIds.includes(result.id))
-    : detail.results;
-  const selectedIds = new Set(selected.map((result) => result.id));
+  const requestedIDs = new Set(resultIds.filter((resultId) => resultId > 0));
+  if (requestedIDs.size === 0) {
+    throw createDemoCodexInspectionError('codex inspection action result ids are required', 400);
+  }
+
+  const detail = readDemoCodexInspectionRunState();
+  if (runId !== detail.run.id) {
+    throw createDemoCodexInspectionError('codex inspection run not found', 404);
+  }
+
+  const completedAt = Date.now();
+  const overrideByID = new Map<number, 'delete'>();
+  actionOverrides.forEach((item) => {
+    const result = detail.results.find((candidate) => candidate.id === item.resultId);
+    if (
+      item.resultId <= 0 ||
+      item.action !== 'delete' ||
+      !requestedIDs.has(item.resultId) ||
+      result?.action !== 'reauth'
+    ) {
+      throw createDemoCodexInspectionError('codex inspection action override is invalid', 400);
+    }
+    overrideByID.set(item.resultId, item.action);
+  });
+
+  const manualResults = detail.results.map((result) => {
+    const action = overrideByID.get(result.id);
+    return action ? { ...result, action } : result;
+  });
+  const selected = manualResults.filter((result) => requestedIDs.has(result.id));
+  if (selected.length === 0) {
+    throw createDemoCodexInspectionError('codex inspection has no actionable results', 400);
+  }
+  const executableActions = new Set(['delete', 'disable', 'enable']);
+  const normalizeActionStatus = (result: CodexInspectionResult): string => {
+    switch (result.actionStatus) {
+      case 'none':
+      case 'pending':
+      case 'success':
+      case 'failed':
+      case 'skipped':
+      case 'needs_review':
+        return result.actionStatus;
+      default:
+        return executableActions.has(result.action) ? 'pending' : 'none';
+    }
+  };
+  const groupsByFileName = new Map<string, CodexInspectionResult[]>();
+  manualResults.forEach((result) => {
+    const fileName = result.fileName.trim();
+    if (!fileName || !executableActions.has(result.action)) return;
+    const group = groupsByFileName.get(fileName) ?? [];
+    group.push(result);
+    groupsByFileName.set(fileName, group);
+  });
+  const seenFileNames = new Set<string>();
+  const plannedOutcomes = selected.map((result) => {
+    const action = result.action;
+    const currentStatus = normalizeActionStatus(result);
+    if (!executableActions.has(action)) {
+      return {
+        result,
+        action,
+        status: 'skipped',
+        success: true,
+        error: '该巡检结果不是可执行动作',
+      };
+    }
+    if (currentStatus === 'success') {
+      return {
+        result,
+        action,
+        status: 'skipped',
+        success: true,
+        error: '该建议动作已执行成功',
+      };
+    }
+    if (currentStatus === 'skipped') {
+      return {
+        result,
+        action,
+        status: 'skipped',
+        success: true,
+        error: '该建议动作已跳过',
+      };
+    }
+    if (currentStatus === 'needs_review') {
+      return {
+        result,
+        action,
+        status: 'needs_review',
+        success: true,
+        error: '该建议动作需要到认证文件管理中人工处理',
+      };
+    }
+    const fileName = result.fileName.trim();
+    if (!fileName) {
+      return {
+        result,
+        action,
+        status: 'failed',
+        success: false,
+        error: '认证文件名为空，无法执行',
+      };
+    }
+    const group = groupsByFileName.get(fileName) ?? [result];
+    if (group.some((item) => item.action !== group[0]?.action)) {
+      return {
+        result,
+        action,
+        status: 'needs_review',
+        success: true,
+        error: '同一认证文件下存在多个不同建议动作，文件级处理已阻止，请到认证文件管理中手动处理',
+      };
+    }
+    if (group[0]?.id !== result.id) {
+      return {
+        result,
+        action,
+        status: 'skipped',
+        success: true,
+        error: 'CPA 认证文件动作按文件执行，该文件已有另一条结果作为可执行项',
+      };
+    }
+    if (seenFileNames.has(fileName)) {
+      return {
+        result,
+        action,
+        status: 'skipped',
+        success: true,
+        error: 'CPA 认证文件动作按文件执行，同名文件已由另一条结果处理',
+      };
+    }
+    seenFileNames.add(fileName);
+    return {
+      result,
+      action,
+      status: 'success',
+      success: true,
+      error: '',
+    };
+  });
+  const outcomeByID = new Map(plannedOutcomes.map((outcome) => [outcome.result.id, outcome]));
+  const actionCount = plannedOutcomes.filter((outcome) => outcome.status === 'success').length;
+  let nextLogID = detail.logs.reduce((maximum, entry) => Math.max(maximum, entry.id), 0) + 1;
+  const createLog = (level: string, message: string, logDetail: unknown) => ({
+    id: nextLogID++,
+    runId: detail.run.id,
+    level,
+    message,
+    detail: logDetail,
+    createdAtMs: completedAt,
+  });
+
+  detail.logs.push(
+    createLog('info', '手动处理账号开始', {
+      requestedCount: resultIds.length,
+      actionCount,
+    })
+  );
+  plannedOutcomes
+    .filter((outcome) => outcome.status !== 'success')
+    .forEach((outcome) => {
+      const failed = outcome.status === 'failed' || !outcome.success;
+      detail.logs.push(
+        createLog(
+          failed ? 'error' : outcome.status === 'needs_review' ? 'warning' : 'info',
+          failed ? '手动处理账号失败' : '手动处理账号跳过',
+          {
+            fileName: outcome.result.fileName,
+            displayAccount: outcome.result.displayAccount,
+            action: outcome.action,
+            status: outcome.status,
+            reason: outcome.error,
+          }
+        )
+      );
+    });
   detail.results = detail.results.map((result) => {
-    if (!selectedIds.has(result.id)) return result;
-    const executedAction = overrideByID.get(result.id) ?? result.action;
+    const outcome = outcomeByID.get(result.id);
+    if (!outcome) return result;
+    if (normalizeActionStatus(result) === 'success' && outcome.status === 'skipped') {
+      return result;
+    }
+    if (outcome.status !== 'success') {
+      return {
+        ...result,
+        actionStatus: outcome.status,
+        executedAction: undefined,
+        actionError: outcome.error,
+      };
+    }
     return {
       ...result,
+      disabled:
+        outcome.action === 'disable' ? true : outcome.action === 'enable' ? false : result.disabled,
       actionStatus: 'success',
-      executedAction,
+      executedAction: outcome.action,
       actionError: undefined,
     };
   });
+  plannedOutcomes
+    .filter((outcome) => outcome.status === 'success')
+    .forEach((outcome) => {
+      detail.logs.push(
+        createLog('success', '手动处理账号成功', {
+          fileName: outcome.result.fileName,
+          displayAccount: outcome.result.displayAccount,
+          action: outcome.action,
+        })
+      );
+    });
+  const outcomeSummary = plannedOutcomes.reduce(
+    (summary, outcome) => {
+      if (outcome.status === 'success') summary.success += 1;
+      else if (outcome.status === 'skipped') summary.skipped += 1;
+      else if (outcome.status === 'needs_review') summary.needsReview += 1;
+      else summary.failed += 1;
+      return summary;
+    },
+    { success: 0, failed: 0, skipped: 0, needsReview: 0 }
+  );
+  detail.logs.push(
+    createLog(
+      outcomeSummary.failed > 0 || outcomeSummary.needsReview > 0 ? 'warning' : 'success',
+      '手动处理账号完成',
+      {
+        successCount: outcomeSummary.success,
+        failedCount: outcomeSummary.failed,
+        skippedCount: outcomeSummary.skipped,
+        needsReviewCount: outcomeSummary.needsReview,
+        resultWriteFailedCount: 0,
+      }
+    )
+  );
+  detail.run.disabledCount = detail.results.filter((result) => result.disabled).length;
+  detail.run.enabledCount = detail.results.length - detail.run.disabledCount;
+  detail.run.error =
+    outcomeSummary.failed > 0
+      ? `${outcomeSummary.failed} 个手动处理动作执行失败，详见巡检日志`
+      : undefined;
+  detail.run.updatedAtMs = completedAt;
+  const nextDetail = replaceDemoCodexInspectionRunState(detail);
   return {
-    outcomes: selected.map((result) => ({
-      resultId: result.id,
-      accountKey: result.accountKey,
-      fileName: result.fileName,
-      displayAccount: result.displayAccount,
-      action: overrideByID.get(result.id) ?? result.action,
-      status: 'done',
-      success: true,
+    outcomes: plannedOutcomes.map((outcome) => ({
+      resultId: outcome.result.id,
+      accountKey: outcome.result.accountKey,
+      fileName: outcome.result.fileName,
+      displayAccount: outcome.result.displayAccount,
+      action: outcome.action,
+      status: outcome.status,
+      success: outcome.success,
+      ...(outcome.error ? { error: outcome.error } : {}),
     })),
-    detail,
+    detail: nextDetail,
   };
 };
 
@@ -1616,8 +1879,8 @@ export const usageServiceApi = {
     limit = 20
   ): Promise<CodexInspectionRunsResponse> => {
     if (__DEMO_SITE__ && isDemoMode()) {
-      const response = getDemoCodexInspectionRuns();
-      return { items: response.items.slice(0, limit) };
+      const detail = readDemoCodexInspectionRunState();
+      return { items: [detail.run].slice(0, limit) };
     }
 
     return withUsageServiceError(async () => {
@@ -1639,7 +1902,11 @@ export const usageServiceApi = {
     id: number
   ): Promise<CodexInspectionRunDetail> => {
     if (__DEMO_SITE__ && isDemoMode()) {
-      return getDemoCodexInspectionRun();
+      const detail = readDemoCodexInspectionRunState();
+      if (id !== detail.run.id) {
+        throw createDemoCodexInspectionError('codex inspection run not found', 404);
+      }
+      return detail;
     }
 
     return withUsageServiceError(async () => {
@@ -1659,7 +1926,7 @@ export const usageServiceApi = {
     managementKey?: string
   ): Promise<CodexInspectionRunDetail> => {
     if (__DEMO_SITE__ && isDemoMode()) {
-      return getDemoCodexInspectionRun();
+      return replaceDemoCodexInspectionRunState(getDemoCodexInspectionRun());
     }
 
     return withUsageServiceError(async () => {
@@ -1683,7 +1950,7 @@ export const usageServiceApi = {
     actionOverrides: CodexInspectionActionOverride[] = []
   ): Promise<CodexInspectionActionsResponse> => {
     if (__DEMO_SITE__ && isDemoMode()) {
-      return getDemoCodexInspectionActionsResponse(resultIds, actionOverrides);
+      return getDemoCodexInspectionActionsResponse(runId, resultIds, actionOverrides);
     }
 
     return withUsageServiceError(async () => {
